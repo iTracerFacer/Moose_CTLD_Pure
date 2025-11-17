@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Complete MOOSE CTLD System — Player & Mission Setup Guide</title>
+<style>
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; color: #1b1f23; padding: 2rem; max-width: 960px; margin: auto; }
+  h1, h2, h3 { line-height: 1.25; }
+  code, pre { background: #f6f8fa; border-radius: 4px; padding: 0.2em 0.4em; }
+  .note { background: #fff8c5; border: 1px solid #e3d888; padding: 0.75rem; border-radius: 6px; }
+  .screenshot { border: 1px dashed #c9d1d9; padding: 0.75rem; border-radius: 8px; color: #57606a; background: #f6f8fa; margin: 1rem 0; }
+  .screenshot strong { color: #24292f; }
+  hr { border: 0; border-top: 1px solid #d0d7de; margin: 2rem 0; }
+  ul { margin: 0.25rem 0 1rem 1.25rem; }
+</style>
+</head>
+<body>
+  <h1>Complete MOOSE CTLD System — Player &amp; Mission Setup Guide</h1>
+  <p>Welcome! This guide explains what logistics means in DCS, how the CTLD system lets players change the battlefield, and exactly how to use the in-game menus. It also includes a concise mission-maker setup section.</p>
+  <hr />
+
+  <h2>What is CTLD and why it matters</h2>
+  <ul>
+    <li>CTLD (logistics &amp; troop transport) turns helicopters and transports into force multipliers.</li>
+    <li>You request “crates” at Supply (Pickup) Zones, deliver them, and build combat units, SAM sites, radars, FOBs, and support vehicles.</li>
+    <li>You can also transport troops and deploy them to hold ground or attack.</li>
+    <li>Every delivered asset can change the front line: new air defenses, JTACs, EWR coverage, armor pushes, or an FOB that shortens logistics legs.</li>
+  </ul>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> F10 -&gt; CTLD root menu</div>
+  <p><em>Tip:</em> The loop you’ll repeat is <strong>Request → Deliver → Build → Fight</strong>.</p>
+  <hr />
+
+  <h2>Getting started (players)</h2>
+  <ol>
+    <li>Spawn in a supported helicopter or transport.</li>
+    <li>Fly to a friendly Supply (Pickup) Zone.</li>
+    <li>Open F10 Other -&gt; CTLD.</li>
+    <li>Use <em>Logistics -&gt; Request Crate</em> to spawn crates; use <em>Operations -&gt; Build</em> to assemble units/sites.</li>
+    <li>Use <em>Navigation</em> to get vectors and Hover Coach, and <em>Field Tools</em> to mark or create a quick Drop Zone.</li>
+    <li>Deliver, build, and watch the mission evolve.</li>
+  </ol>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Example Pickup Zone with smoke</div>
+  <hr />
+
+  <h2>Menu overview (matches in-game structure)</h2>
+  <p>Below are the menu groups and the common actions you’ll see under each. Some options appear only when relevant (e.g., inventory enabled, crates nearby, zones configured).</p>
+
+  <h3>Operations</h3>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Operations menu open</div>
+  <ul>
+    <li><strong>Troop Transport</strong>
+      <ul>
+        <li><strong>Load Troops</strong>: Load infantry while inside an ACTIVE Supply (Pickup) Zone if the mission enforces this rule.</li>
+        <li><strong>Deploy Troops (Defend)</strong>: Unload troops to hold the current area and defend nearby.</li>
+        <li><strong>Deploy Troops (Attack)</strong>: Unload troops and order them to seek and engage enemies or move toward enemy-held bases (mission-configured behavior and speed). Static/unsuitable units will hold position.</li>
+        <li><em>Notes:</em>
+          <ul>
+            <li>Troop loading may be restricted to Pickup Zones. The nearest zone will be shown in messages if you’re outside.</li>
+            <li>Deployment is blocked inside Pickup Zones when restrictions are enabled.</li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+    <li><strong>Build</strong>
+      <ul>
+        <li><strong>Build Here</strong>: Consumes nearby crates (within the Build Radius) and spawns the unit/site at your position. Includes a “confirm within X seconds” safety and a cooldown between builds.</li>
+        <li><strong>Build (Advanced) → Buildable Near You</strong>
+          <ul>
+            <li>Lists everything that can be built with crates you’ve dropped nearby (and optionally what you’re carrying, depending on mission settings).</li>
+            <li>Per item you’ll see:
+              <ul>
+                <li><strong>Build [Hold Position]</strong>: Spawns and orders the unit/site to hold.</li>
+                <li><strong>Build [Attack (N m)]</strong>: Spawns and orders mobile units to seek/attack within the configured radius. Static/unsuitable units will still hold.</li>
+              </ul>
+            </li>
+            <li><strong>Refresh Buildable List</strong>: Re-scan nearby crates and update the list.</li>
+          </ul>
+        </li>
+        <li>FOB-only recipes can require building inside an FOB Zone when enabled (mission-specific rule).</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>Logistics</h3>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Logistics -&gt; Request Crate</div>
+  <ul>
+    <li><strong>Request Crate</strong>
+      <ul>
+        <li>Menu is organized by categories (e.g., Combat Vehicles, AAA, SAM short range, Support, Artillery, etc.).</li>
+        <li>Each entry shows how many crates are required (e.g., “M1097 Avenger (2 crates)”).</li>
+        <li>Requests generally require being within the maximum distance to an ACTIVE Pickup Zone.</li>
+        <li>When inventory is enabled, stock is tracked per zone; out-of-stock types cannot be requested at that location until resupplied.</li>
+      </ul>
+    </li>
+    <li><strong>Recipe Info</strong>
+      <ul>
+        <li>Browse categories and see each item’s description; use this to plan which crates you need to build a unit or a multi-crate site.</li>
+      </ul>
+    </li>
+    <li><strong>Request Crate (In Stock Here)</strong>
+      <ul>
+        <li>Appears when inventory menus are enabled and the mission-maker has exposed this view.</li>
+        <li>Shows only items in stock at your nearest active Supply Zone and lets you spawn them directly.</li>
+        <li>Includes a “Refresh” option to update the list after requests.</li>
+      </ul>
+    </li>
+    <li><strong>Crate handling tips</strong>
+      <ul>
+        <li>Crates are marked with smoke at spawn.</li>
+        <li>Use <em>Navigation → Request Vectors to Nearest Crate</em> if you lose sight of it.</li>
+        <li>Hover pickup: hold roughly 5–20 m AGL, very low ground speed, steady for a few seconds to auto-load.</li>
+        <li>Crates have a mission-configured lifetime and will self-cleanup if not used.</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>Field Tools</h3>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Field Tools menu open</div>
+  <ul>
+    <li><strong>Create Drop Zone (AO)</strong>: Quickly creates a temporary Drop Zone around your current position for coordination or scripted objectives.</li>
+    <li><strong>Smoke My Location</strong>: Green / Red / White / Orange / Blue — mark your current spot with smoke to help other players find you or the build point.</li>
+  </ul>
+
+  <h3>Navigation</h3>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Navigation menu open</div>
+  <ul>
+    <li><strong>Hover Coach: Enable / Disable</strong>: In-game guidance messages to help you nail the hover pickup window (AGL, drift, speed, “hold steady” cues).</li>
+    <li><strong>Request Vectors to Nearest Crate</strong>: Prints bearing and range to the closest friendly crate.</li>
+    <li><strong>Vectors to Nearest Pickup Zone</strong>: Bearing and range to the nearest active Supply (Pickup) Zone; if none are active, you’ll get helpful direction to the nearest configured one.</li>
+  </ul>
+
+  <h3>Admin/Help</h3>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Admin/Help menu open</div>
+  <ul>
+    <li><strong>Show CTLD Status</strong>: Quick summary of active crates, how many zones exist, and whether Build Confirm/Cooldown are ON.</li>
+    <li><strong>Draw CTLD Zones on Map / Clear CTLD Map Drawings</strong>: Draws labeled circles for Pickup/Drop/FOB zones on the F10 map for your coalition; clear them when you’re done.</li>
+    <li><strong>Debug → Enable/Disable logging</strong>: Toggle detailed logging (mission maker troubleshooting).</li>
+    <li><strong>Player Guides</strong>: Zones – Guide; Inventory – How It Works; CTLD Basics; Troop Transport &amp; JTAC Use; Hover Pickup &amp; Slingloading; Build System; SAM Sites.</li>
+    <li><strong>Coalition Summary</strong> (if exposed by mission maker): A roll-up of coalition CTLD activity.</li>
+  </ul>
+
+  <hr />
+  <h2>How players influence the mission</h2>
+  <ul>
+    <li>Build air defenses (SAM/AAA) to protect friendly FARPs/FOBs and deny enemy air.</li>
+    <li>Deploy armor and ATGM teams to push objectives, ambush enemy convoys, or hold key terrain.</li>
+    <li>Build EWR/JTAC for better situational awareness and targeting support.</li>
+    <li>Establish FOBs to create forward supply hubs and shorten flight times.</li>
+  </ul>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Example built SAM site</div>
+
+  <hr />
+  <h2>Mission setup (for mission makers)</h2>
+  <p>Keep this section short and focused. You can find the defaults and toggles inside:</p>
+  <ul>
+    <li><code>Moose_CTLD_Pure/Moose_CTLD.lua</code> (main CTLD implementation; see the <code>CTLD.Config</code> table)</li>
+    <li><code>Moose_CTLD_Pure/Moose_CTLD_FAC.lua</code> (optional FAC/RECCE support)</li>
+    <li><code>Moose_CTLD_Pure/catalogs/</code> (example catalogs with ready-to-use recipes)</li>
+    <li><code>Moose_CTLD_Pure/init_mission_dual_coalition.lua</code> (ready-to-use minimal init for BLUE+RED)</li>
+  </ul>
+
+  <h3>Load order (Do Script File in Mission Editor)</h3>
+  <ol>
+    <li><code>Moose.lua</code></li>
+    <li><code>Moose_CTLD_Pure/Moose_CTLD.lua</code></li>
+    <li>A catalog file from <code>Moose_CTLD_Pure/catalogs/</code> (optional but recommended)</li>
+    <li><code>Moose_CTLD_Pure/Moose_CTLD_FAC.lua</code> (optional FAC/RECCE)</li>
+    <li>Your mission init block (you can use <code>Moose_CTLD_Pure/init_mission_dual_coalition.lua</code> as-is or adapt it)</li>
+  </ol>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Mission Editor Do Script File list</div>
+
+  <p><strong>Minimal snippet (example)</strong> — keep it to the point:</p>
+  <ul>
+    <li>Create a CTLD instance per coalition with: CoalitionSide, AllowedAircraft, Zones (Pickup/Drop/FOB definitions), and key toggles.</li>
+    <li>Optionally create a FAC module instance and run it.</li>
+    <li>Optionally merge a crate catalog.</li>
+  </ul>
+  <p><em>Hint:</em> See the shipped <code>init_mission_dual_coalition.lua</code> for a clean example of both BLUE and RED.</p>
+
+  <h3>Zones you must create in the Mission Editor</h3>
+  <ul>
+    <li>Pickup (Supply): e.g., <code>ALPHA</code> (BLUE), <code>DELTA</code> (RED)</li>
+    <li>Drop: e.g., <code>BRAVO</code> (BLUE), <code>ECHO</code> (RED)</li>
+    <li>FOB: e.g., <code>CHARLIE</code> (BLUE), <code>FOXTROT</code> (RED)</li>
+  </ul>
+  <p>Use the names referenced by your init script. The example init uses flags to control active/inactive state.</p>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Trigger zones for Pickup/Drop/FOB</div>
+
+  <h3>Frequently configured options (where to change)</h3>
+  <p>All of the following live under <code>CTLD.Config</code> in <code>Moose_CTLD.lua</code> or can be provided in the table passed to <code>_MOOSE_CTLD:New({...})</code> in your init script.</p>
+  <ul>
+    <li><strong>Logistics rules</strong>
+      <ul>
+        <li><code>RequirePickupZoneForCrateRequest</code></li>
+        <li><code>RequirePickupZoneForTroopLoad</code></li>
+        <li><code>PickupZoneMaxDistance</code></li>
+        <li><code>ForbidDropsInsidePickupZones</code></li>
+        <li><code>ForbidTroopDeployInsidePickupZones</code></li>
+        <li><code>ForbidChecksActivePickupOnly</code></li>
+      </ul>
+    </li>
+    <li><strong>Building behavior</strong>
+      <ul>
+        <li><code>BuildRadius</code></li>
+        <li><code>BuildSpawnOffset</code></li>
+        <li><code>BuildConfirmEnabled</code> + <code>BuildConfirmWindowSeconds</code></li>
+        <li><code>BuildCooldownEnabled</code> + <code>BuildCooldownSeconds</code></li>
+        <li><code>RestrictFOBToZones</code></li>
+        <li><code>AutoBuildFOBInZones</code></li>
+      </ul>
+    </li>
+    <li><strong>Inventory system (per-zone stock)</strong>
+      <ul>
+        <li><code>Inventory.Enabled</code></li>
+        <li><code>Inventory.ShowStockInMenu</code></li>
+        <li><code>Inventory.HideZeroStockMenu</code></li>
+        <li><code>Inventory.FOBStockFactor</code></li>
+      </ul>
+    </li>
+    <li><strong>Hover &amp; pickup quality-of-life</strong>
+      <ul>
+        <li><code>HoverCoachConfig</code> (messages/timing/thresholds)</li>
+        <li><code>TroopSpawnOffset</code></li>
+      </ul>
+    </li>
+    <li><strong>AI behavior for Attack builds</strong>
+      <ul>
+        <li><code>AttackAI.VehicleSearchRadius</code></li>
+        <li><code>AttackAI.MoveSpeedKmh</code></li>
+      </ul>
+    </li>
+    <li><strong>Menus</strong>
+      <ul>
+        <li><code>UseGroupMenus</code></li>
+        <li><code>UseCategorySubmenus</code></li>
+        <li><code>PickupZoneSmokeColor</code></li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>Crate catalog (recipes)</h3>
+  <ul>
+    <li>Use one of the provided catalogs under <code>Moose_CTLD_Pure/catalogs/</code> or your own.</li>
+    <li>Each entry defines a display label, side, category, stock, and a build function.</li>
+    <li>Multi-crate “SITE” entries build multi-unit groups (SAM sites or composite systems).</li>
+    <li><strong>Typical workflow</strong>
+      <ul>
+        <li>Load your chosen catalog after <code>Moose_CTLD.lua</code>.</li>
+        <li>Merge it into each CTLD instance you created.</li>
+      </ul>
+    </li>
+  </ul>
+  <div class="screenshot"><strong>Screenshot placeholder:</strong> Request Crate categories</div>
+
+  <h3>Dual-coalition setup</h3>
+  <ul>
+    <li>Instantiate two CTLD instances (one per side), each with its own zone names and smoke colors.</li>
+    <li>Instantiate two FAC modules if you want auto-lase/RECCE for both sides.</li>
+    <li>The included <code>init_mission_dual_coalition.lua</code> shows a minimal working setup.</li>
+  </ul>
+
+  <h3>FAC/RECCE (optional, from <code>Moose_CTLD_FAC.lua</code>)</h3>
+  <ul>
+    <li><strong>What it adds</strong>: Auto-lase with configurable laser codes, IR markers, map marks; manual target lists; multi-strike helper; artillery/naval/air tasking; RECCE sweeps with DMS/MGRS.</li>
+    <li><strong>Player usage</strong>: Look for an F10 FAC/RECCE menu in qualifying aircraft or groups.</li>
+    <li><strong>Mission knobs</strong>: CoalitionSide, auto-lase behavior, code reservations, marker type/color, on-station logic—see <code>Moose_CTLD_FAC.lua</code> or pass overrides to <code>:New()</code>.</li>
+  </ul>
+
+  <h3>Sanity checks and troubleshooting</h3>
+  <ul>
+    <li>Use <em>Admin/Help -&gt; Show CTLD Status</em> to verify counts and toggles quickly.</li>
+    <li>Draw zones to confirm names/positions match your intent.</li>
+    <li>If crates don’t spawn: check zone active state, distance to zone, and inventory stock.</li>
+    <li>If builds don’t trigger: check Build Radius, confirm window, cooldown, and that the crates match the recipe.</li>
+  </ul>
+
+  <hr />
+  <h2>Screenshot ideas (drop your captures in the placeholders above)</h2>
+  <ul>
+    <li>CTLD root menu with the five groups (Operations, Logistics, Field Tools, Navigation, Admin/Help)</li>
+    <li>Request Crate with category submenus visible</li>
+    <li>Build (Advanced) -&gt; Buildable Near You list</li>
+    <li>Hover Coach prompt during a near-perfect hover</li>
+    <li>Vectors message to a crate / pickup zone</li>
+    <li>Zone drawings on the F10 map (Pickup/Drop/FOB labeled)</li>
+    <li>In Stock Here list (if enabled)</li>
+    <li>Example SAM site placed after a build</li>
+  </ul>
+
+  <hr />
+  <h2>Appendix: File locations and names</h2>
+  <ul>
+    <li>Main CTLD: <code>Moose_CTLD_Pure/Moose_CTLD.lua</code></li>
+    <li>FAC/RECCE: <code>Moose_CTLD_Pure/Moose_CTLD_FAC.lua</code></li>
+    <li>Example dual-coalition init: <code>Moose_CTLD_Pure/init_mission_dual_coalition.lua</code></li>
+    <li>Catalogs: <code>Moose_CTLD_Pure/catalogs/</code></li>
+  </ul>
+  <p>No large code is required; most options are cleanly exposed in the config tables. Keep snippets tiny when needed.</p>
+</body>
+</html>

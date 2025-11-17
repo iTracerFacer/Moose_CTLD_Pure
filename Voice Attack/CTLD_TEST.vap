@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-16"?>
+<Profile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Name>DCS CTLD Menu Navigation</Name>
+  <Id>a8f7c9d2-4e6b-4c1a-9f3e-2a8d7c6b5e4f</Id>
+  <Commands>
+    <Command>
+      <Id>3a7f2b1e-8c4d-4f9a-b2e1-5d6c7a8b9c0d</Id>
+      <CommandString>load troops</CommandString>
+      <ActionSequence>
+        <PressKey>
+          <KeyCodes>{RALT}\{F2}{F1}{F1}</KeyCodes>
+        </PressKey>
+      </ActionSequence>
+    </Command>
+    <Command>
+      <Id>4b8c9d0e-1f2a-3b4c-5d6e-7f8a9b0c1d2e</Id>
+      <CommandString>show status;ctld status;check status</CommandString>
+      <ActionSequence>
+        <PressKey>
+          <KeyCodes>{RALT}\{F5}{F2}</KeyCodes>
+        </PressKey>
+      </ActionSequence>
+    </Command>
+  </Commands>
+</Profile>
