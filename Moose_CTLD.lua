@@ -16,7 +16,7 @@
 -- Moose adaptation: Lathe, Copilot, F99th-TracerFacer
 
 -- #region Config
-
+_DEBUG = true
 local CTLD = {}
 CTLD.Version = '1.0.2'
 CTLD.__index = CTLD
@@ -178,6 +178,17 @@ CTLD.Messages = {
   slingload_salvage_zone_activated = "Salvage Collection Zone '{zone}' is now ACTIVE.",
   slingload_salvage_zone_deactivated = "Salvage Collection Zone '{zone}' is now INACTIVE.",
   slingload_salvage_warn_30min = "SALVAGE REMINDER: Crate {id} at {grid} expires in 30 minutes. Weight: {weight}kg.",
+  slingload_manual_crates_registered = "Registered {count} pre-placed salvage crate(s) from mission editor.",
+  
+  -- FARP System messages
+  farp_upgrade_started = "Upgrading FOB to FARP Stage {stage}... Building in progress.",
+  farp_upgrade_complete = "{player} upgraded FOB to FARP Stage {stage}! Services available: {services}",
+  farp_upgrade_insufficient_salvage = "Insufficient salvage to upgrade to FARP Stage {stage}. Need {need} points (have {current}). Deliver crews to MASH or sling-load salvage!",
+  farp_status = "FOB Status: FARP Stage {stage}/{max_stage}\nServices: {services}\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
+  farp_status_maxed = "FOB Status: FARP Stage {stage}/{max_stage} (FULLY UPGRADED)\nServices: {services}",
+  farp_not_at_fob = "You must be near a FOB Pickup Zone to upgrade it to a FARP.",
+  farp_already_maxed = "This FOB is already at maximum FARP stage (Stage 3).",
+  farp_service_available = "FARP services available: Rearm, Refuel, Repair for ground vehicles and helicopters within {radius}m.",
   slingload_salvage_warn_5min = "SALVAGE URGENT: Crate {id} at {grid} expires in 5 minutes!",
   slingload_salvage_hooked_in_zone = "Salvage crate {id} is inside {zone}. Release the sling to complete delivery.",
   slingload_salvage_wrong_zone = "Salvage crate {id} is sitting in {zone_type} zone {zone}. Take it to an active Salvage zone for credit.",
@@ -350,7 +361,7 @@ CTLD.Config = {
   -- 2 = INFO      - Important state changes, initialization, cleanup (default for production)
   -- 3 = VERBOSE   - Detailed operational info (zone validation, menus, builds, MEDEVAC events)
   -- 4 = DEBUG     - Everything including hover checks, crate pickups, detailed troop spawns
-  LogLevel = 1,  -- lowered from DEBUG (4) to INFO (2) for production performance
+  LogLevel = 4,  -- lowered from DEBUG (4) to INFO (2) for production performance
   MessageDuration = 15,                  -- seconds for on-screen messages
 
   -- Debug toggles for detailed crate proximity logging (useful when tuning hover coach / ground autoload)
@@ -431,7 +442,8 @@ CTLD.Config = {
 
   -- === Build & Crate Handling ===
   BuildRequiresGroundCrates = true,      -- required crates must be on the ground (not still carried)
-  BuildRadius = 60,                      -- meters around build point to collect crates
+  BuildRadius = 100,                     -- meters around build point to collect crates
+  BuildDispersionRadius = 30,            -- meters: randomize spawn positions within this radius (Build All mode only; 0 = disable)
   RestrictFOBToZones = false,            -- only allow FOB recipes inside configured FOBZones
   AutoBuildFOBInZones = false,           -- auto-build FOB recipes when required crates are inside a FOB zone
   CrateLifetime = 3600,                  -- seconds before crates auto-clean up; 0 = disable
@@ -518,6 +530,10 @@ CTLD.Config = {
     TroopSearchRadius = 6000,       -- meters: when deploying troops with Attack, search radius for targets/bases
     VehicleSearchRadius = 12000,     -- meters: when building vehicles with Attack, search radius
     PrioritizeEnemyBases = true,    -- if true, prefer enemy-held bases over ground units when both are in range
+    -- Smart omniscient targeting: when true, LOS / DCS detection quirks are ignored for target *selection*.
+    -- The script will always pick the nearest valid enemy/base within the configured radius and order a move
+    -- toward it. DCS AI LOS still governs when units can actually fire once they get there.
+    SmartTargeting = true,
     TroopAdvanceSpeedKmh = 20,      -- movement speed for troops when ordered to attack
     VehicleAdvanceSpeedKmh = 35,    -- movement speed for vehicles when ordered to attack
   },
@@ -599,6 +615,10 @@ CTLD.Config = {
   SlingLoadSalvage = {
     Enabled = true,
     
+    -- Manual salvage crates (pre-placed in mission editor)
+    EnableManualCrates = true,      -- Scan for and register pre-placed cargo statics as salvage
+    ManualCratePrefix = 'SALVAGE-', -- Only cargo statics starting with this prefix are registered
+    
     -- Spawn probability when enemy ground units die
     SpawnChance = {
       [coalition.side.BLUE] = 0.20, -- 20% chance when BLUE unit dies (RED can collect the salvage)
@@ -645,6 +665,15 @@ CTLD.Config = {
       'ammo_cargo',
       'fueltank_cargo',
       'barrels_cargo',
+      'uh1h_cargo',
+      'pipes_small_cargo',
+      'pipes_big_cargo',
+      'tetrapod_cargo',
+      'trunks_small_cargo',
+      'trunks_long_cargo',
+      'oiltank_cargo',
+      'f_bar_cargo',
+      'm117_cargo',
     },
     
     -- Salvage Collection Zone defaults
@@ -658,6 +687,163 @@ CTLD.Config = {
   },
 }
   -- #endregion Config
+
+-- =========================
+-- FARP System Configuration
+-- =========================
+-- Progressive FOB->FARP upgrade system with static object layouts
+CTLD.FARPConfig = {
+  Enabled = true,
+  
+  -- Salvage costs for each stage upgrade
+  StageCosts = {
+    [1] = 3,   -- FOB -> Stage 1 FARP (basic pad)
+    [2] = 5,   -- Stage 1 -> Stage 2 (operational fuel)
+    [3] = 8,   -- Stage 2 -> Stage 3 (full forward airbase)
+  },
+  
+  -- Service zone radius for rearm/refuel at each stage
+  ServiceRadius = {
+    [1] = 50,   -- Stage 1: basic pad only
+    [2] = 65,   -- Stage 2: fuel operations
+    [3] = 80,   -- Stage 3: full services
+  },
+  
+  -- Static object layouts for each FARP stage
+  -- Format: { type = "DCS_Static_Name", x = offset_x, z = offset_z, heading = degrees, height = 0 }
+  -- Positions are relative to FOB center point
+  StageLayouts = {
+    -- Stage 1: Basic FARP Pad (3 salvage)
+    [1] = {
+      { type = "FARP CP Blindage", x = 0, z = 25, heading = 180 },
+      { type = "FARP Tent", x = 17.3, z = 10, heading = 240 },
+      { type = "FARP Tent", x = -17.3, z = 10, heading = 120 },
+      { type = "container_20ft", x = 15.4, z = -6.2, heading = 90 },
+      { type = "container_20ft", x = -15.4, z = -6.2, heading = 90 },
+      { type = "Windsock", x = 0, z = 30, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 13, z = -10.6, heading = 30 },
+      { type = "FARP Ammo Dump Coating", x = -13, z = -10.6, heading = 330 },
+      { type = ".Ammunition depot", x = 17, z = 12, heading = 0 },
+      { type = ".Ammunition depot", x = -17, z = 12, heading = 0 },
+      { type = "BarrelCargo", x = 8, z = -18, heading = 0 },
+      { type = "BarrelCargo", x = -8, z = -18, heading = 0 },
+      { type = "BarrelCargo", x = 12, z = 20, heading = 0 },
+      { type = "BarrelCargo", x = -12, z = 20, heading = 0 },
+      { type = "GeneratorF", x = 22, z = -3, heading = 270 },
+      { type = "Sandbox", x = 10, z = -16, heading = 0 },
+      { type = "Sandbox", x = -10, z = -16, heading = 0 },
+      { type = "Sandbox", x = 10, z = 16, heading = 0 },
+      { type = "Sandbox", x = -10, z = 16, heading = 0 },
+      { type = "Sandbox", x = 18, z = 0, heading = 0 },
+      { type = "Sandbox", x = -18, z = 0, heading = 0 },
+    },
+    
+    -- Stage 2: Operational FARP - adds fuel capability (5 more salvage)
+    [2] = {
+      { type = "M978 HEMTT Tanker", x = 35, z = 0, heading = 270 },
+      { type = "M978 HEMTT Tanker", x = -35, z = 0, heading = 90 },
+      { type = "FARP Fuel Depot", x = 40, z = -8, heading = 0 },
+      { type = "FARP Fuel Depot", x = -40, z = -8, heading = 0 },
+      { type = "FARP Tent", x = 26.5, z = 21.7, heading = 210 },
+      { type = "FARP Tent", x = -26.5, z = 21.7, heading = 150 },
+      { type = "container_40ft", x = 0, z = -35, heading = 0 },
+      { type = "container_40ft", x = 8, z = -35, heading = 0 },
+      { type = "Hesco_wallperimeter_7", x = 0, z = 42, heading = 0 },
+      { type = "Hesco_wallperimeter_7", x = 30, z = 30, heading = 315 },
+      { type = "Hesco_wallperimeter_7", x = -30, z = 30, heading = 45 },
+      { type = "Red_Flag", x = 0, z = 45, heading = 0 },
+      { type = "Red_Flag", x = 45, z = 0, heading = 0 },
+      { type = "Red_Flag", x = -45, z = 0, heading = 0 },
+      { type = "Red_Flag", x = 0, z = -45, heading = 0 },
+      { type = "Ural-375 PBU", x = 32.9, z = -13.1, heading = 225 },
+      { type = "Electric power box", x = 28, z = 20, heading = 0 },
+      { type = "Electric power box", x = -28, z = 20, heading = 0 },
+      { type = "Landmine pot", x = 36, z = 8, heading = 0 },
+      { type = "Landmine pot", x = -36, z = 8, heading = 0 },
+      { type = "Landmine pot", x = 30, z = -25, heading = 0 },
+      { type = "Landmine pot", x = -30, z = -25, heading = 0 },
+      { type = "Landmine pot", x = 20, z = 30, heading = 0 },
+      { type = "Landmine pot", x = -20, z = 30, heading = 0 },
+      { type = "Tetrapod", x = 42, z = 15, heading = 0 },
+      { type = "Tetrapod", x = -42, z = 15, heading = 0 },
+      { type = "Tetrapod", x = 42, z = -15, heading = 0 },
+      { type = "Tetrapod", x = -42, z = -15, heading = 0 },
+      { type = "Tetrapod", x = 15, z = 42, heading = 0 },
+      { type = "Tetrapod", x = -15, z = 42, heading = 0 },
+      { type = "Tetrapod", x = 15, z = -42, heading = 0 },
+      { type = "Tetrapod", x = -15, z = -42, heading = 0 },
+      { type = "FARP Command Post", x = 0, z = 25, heading = 180 },
+    },
+    
+    -- Stage 3: Full Forward Airbase - adds ammo and comms (8 more salvage)
+    [3] = {
+      { type = "M939 Heavy", x = 38.9, z = -21.9, heading = 225 },
+      { type = "M939 Heavy", x = -38.9, z = -21.9, heading = 135 },
+      { type = "Shelter", x = 0, z = -50, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 48, z = -10, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = -48, z = -10, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 45, z = -20, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = -45, z = -20, heading = 0 },
+      { type = "SKP-11", x = 0, z = 55, heading = 180 },
+      { type = "ZiL-131 APA-80", x = 8, z = 52, heading = 180 },
+      { type = "Hesco_wallperimeter_1", x = 52, z = 30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = -52, z = 30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = 52, z = -30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = -52, z = -30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = 30, z = 52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = -30, z = 52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = 30, z = -52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = -30, z = -52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = 45, z = 40, heading = 45 },
+      { type = "Hesco_wallperimeter_1", x = -45, z = 40, heading = 315 },
+      { type = "Hesco_wallperimeter_1", x = 45, z = -40, heading = 135 },
+      { type = "Hesco_wallperimeter_1", x = -45, z = -40, heading = 225 },
+      { type = "FARP Tent", x = 52, z = 0, heading = 270 },
+      { type = "FARP Tent", x = -52, z = 0, heading = 90 },
+      { type = "FARP Tent", x = 36.8, z = 36.8, heading = 225 },
+      { type = "container_20ft", x = -30, z = -38, heading = 45 },
+      { type = "container_20ft", x = -35, z = -33, heading = 45 },
+      { type = "container_20ft", x = -25, z = -43, heading = 45 },
+      { type = "container_20ft", x = -33, z = -45, heading = 135 },
+      { type = "GeneratorF", x = 43.1, z = -31.4, heading = 225 },
+      { type = "UAZ-469", x = 12, z = 48, heading = 200 },
+      { type = "UAZ-469", x = 16, z = 50, heading = 170 },
+      { type = "Ural-375", x = -25, z = -35, heading = 45 },
+      { type = "Landmine pot", x = 50, z = 15, heading = 0 },
+      { type = "Landmine pot", x = -50, z = 15, heading = 0 },
+      { type = "Landmine pot", x = 50, z = -15, heading = 0 },
+      { type = "Landmine pot", x = -50, z = -15, heading = 0 },
+      { type = "Landmine pot", x = 15, z = 50, heading = 0 },
+      { type = "Landmine pot", x = -15, z = 50, heading = 0 },
+      { type = "Landmine pot", x = 40, z = 30, heading = 0 },
+      { type = "Landmine pot", x = -40, z = 30, heading = 0 },
+      { type = "Landmine pot", x = 30, z = -40, heading = 0 },
+      { type = "Landmine pot", x = -30, z = -40, heading = 0 },
+      { type = "Landmine pot", x = 45, z = 25, heading = 0 },
+      { type = "Landmine pot", x = -45, z = 25, heading = 0 },
+      { type = "billboard_motorized rifle troops", x = 0, z = -58, heading = 0 },
+      { type = "Sandbox", x = 38, z = -8, heading = 0 },
+      { type = "Sandbox", x = -38, z = -8, heading = 0 },
+      { type = "Sandbox", x = 38, z = 8, heading = 0 },
+      { type = "Sandbox", x = -38, z = 8, heading = 0 },
+      { type = "Black_Tyre", x = 20, z = -48, heading = 0 },
+      { type = "Black_Tyre", x = -20, z = -48, heading = 0 },
+      { type = "Black_Tyre", x = 24, z = -46, heading = 0 },
+      { type = "Black_Tyre", x = -24, z = -46, heading = 0 },
+      { type = "Black_Tyre", x = 28, z = -44, heading = 0 },
+      { type = "Black_Tyre", x = -28, z = -44, heading = 0 },
+      { type = "Black_Tyre", x = 48, z = 20, heading = 0 },
+      { type = "Black_Tyre", x = -48, z = 20, heading = 0 },
+      { type = "WatchTower", x = -38.9, z = 38.9, heading = 225 },
+      { type = "warning_board_c", x = 0, z = 48, heading = 180 },
+      { type = "warning_board_c", x = 48, z = 0, heading = 270 },
+      { type = "warning_board_c", x = -48, z = 0, heading = 90 },
+      { type = "warning_board_c", x = 35, z = -35, heading = 45 },
+      { type = "warning_board_c", x = -35, z = -35, heading = 315 },
+      { type = "warning_board_c", x = 35, z = 35, heading = 225 },
+    },
+  },
+}
 
 -- Immersive Hover Coach configuration (messages, thresholds, throttling)
 -- All user-facing text lives here; logic only fills placeholders.
@@ -1043,8 +1229,8 @@ CTLD.MEDEVAC = {
   -- Crew spawning
   -- Per-coalition spawn probabilities for asymmetric scenarios
   CrewSurvivalChance = {
-    [coalition.side.BLUE] = .30,  -- probability (0.0-1.0) that BLUE crew survives to spawn MEDEVAC request. 1.0 = 100% (testing), 0.02 = 2% (production)
-    [coalition.side.RED] = .30,   -- probability (0.0-1.0) that RED crew survives to spawn MEDEVAC request
+    [coalition.side.BLUE] = .50,  -- probability (0.0-1.0) that BLUE crew survives to spawn MEDEVAC request. 1.0 = 100% (testing), 0.02 = 2% (production)
+    [coalition.side.RED] = .50,   -- probability (0.0-1.0) that RED crew survives to spawn MEDEVAC request
   },
   ManPadSpawnChance = {
     [coalition.side.BLUE] = 0.1,  -- probability (0.0-1.0) that BLUE crew spawns with a MANPADS soldier. 1.0 = 100% (testing), 0.1 = 10% (production)
@@ -1892,6 +2078,10 @@ CTLD._salvageStats = CTLD._salvageStats or {      -- [coalition.side] = { spawne
 }
 -- One-shot timer tracking for cleanup
 CTLD._pendingTimers = CTLD._pendingTimers or {}  -- [timerId] = true
+
+-- FARP System state
+CTLD._farpData = CTLD._farpData or {}  -- [fobZoneName] = { stage = 1/2/3, statics = {name1, name2...}, coalition = side }
+CTLD._farpZones = CTLD._farpZones or {}  -- [farpZoneName] = { zone, side, stage }
 
 local function _distanceXZ(a, b)
   if not a or not b then return math.huge end
@@ -4330,54 +4520,114 @@ end
 -- Order a ground group by name to move toward target point at a given speed (km/h). Uses MOOSE route when available.
 function CTLD:_orderGroundGroupToPointByName(groupName, targetPoint, speedKmh)
   if not groupName or not targetPoint then return end
-  local mg
-  local ok = pcall(function() mg = GROUP:FindByName(groupName) end)
-  if ok and mg then
-    local vec2 = (VECTOR2 and VECTOR2.New) and VECTOR2:New(targetPoint.x, targetPoint.z) or { x = targetPoint.x, y = targetPoint.z }
-    -- RouteGroundTo(speed km/h). Use pcall to avoid mission halt if API differs.
-    local _, _ = pcall(function() mg:RouteGroundTo(vec2, speedKmh or 25) end)
-    return
-  end
-  -- Fallback: DCS Group controller simple mission to single waypoint
-  local dg = Group.getByName(groupName)
-  if not dg then return end
-  local ctrl = dg:getController()
-  if not ctrl then return end
-  -- Try to set a simple go-to task
-  local task = {
-    id = 'Mission',
-    params = {
-      route = {
-        points = {
-          {
-            x = targetPoint.x, y = targetPoint.z, speed = 5, action = 'Off Road', task = {}, type = 'Turning Point', ETA = 0, ETA_locked = false,
-          }
-        }
-      }
-    }
-  }
-  pcall(function() ctrl:setTask(task) end)
+  -- Pure-MOOSE movement: schedule a small delay so the dynamic group has
+  -- time to be fully registered in the MOOSE database before we attempt
+  -- to route it. DCS AI will handle targeting when enemies come into LOS;
+  -- we only care about advancing toward the chosen objective area.
+
+  local delay = 2 -- seconds
+  local dest = { x = targetPoint.x, z = targetPoint.z }
+  timer.scheduleFunction(function()
+    local mg
+    local ok = pcall(function() mg = GROUP:FindByName(groupName) end)
+    if not (ok and mg and mg:IsAlive()) then 
+      _logError(string.format("ATTACK AI: Failed to find group '%s' for routing", groupName or 'nil'))
+      return 
+    end
+
+    _logDebug(string.format("ATTACK AI: Routing group '%s' to target (%.1f, %.1f) at %d km/h", 
+      groupName, dest.x, dest.z, speedKmh or 25))
+
+    local vec2
+    if VECTOR2 and VECTOR2.New then
+      vec2 = VECTOR2:New(dest.x, dest.z)
+    else
+      vec2 = { x = dest.x, y = dest.z }
+    end
+
+    local success = pcall(function()
+      -- Set ROE to allow engaging targets
+      if mg.OptionROEOpenFire then
+        mg:OptionROEOpenFire()
+        _logDebug(string.format("ATTACK AI: Set ROE OpenFire for '%s'", groupName))
+      end
+      -- Set alarm state to Auto (alert and ready)
+      if mg.OptionAlarmStateAuto then
+        mg:OptionAlarmStateAuto()
+        _logDebug(string.format("ATTACK AI: Set AlarmState Auto for '%s'", groupName))
+      end
+      
+      -- Create a temporary zone at the target point for TaskRouteToZone
+      -- This is the proven method used by DynamicGroundBattle plugin
+      local targetCoord = COORDINATE:New(dest.x, 0, dest.z)
+      local tempZone = ZONE_RADIUS:New("CTLD_TEMP_TARGET_" .. groupName, targetCoord:GetVec2(), 100)
+      
+      -- Use TaskRouteToZone with randomization (same as working DGB plugin)
+      mg:TaskRouteToZone(tempZone, true)
+      _logDebug(string.format("ATTACK AI: TaskRouteToZone issued for '%s' to (%.1f, %.1f)", groupName, dest.x, dest.z))
+    end)
+    
+    if not success then
+      _logError(string.format("ATTACK AI: Failed to issue route commands for group '%s'", groupName))
+    end
+  end, {}, timer.getTime() + delay)
 end
 
 -- Assign attack behavior to a newly spawned ground group by name
 function CTLD:_assignAttackBehavior(groupName, originPoint, isVehicle)
-  if not (self.Config.AttackAI and self.Config.AttackAI.Enabled) then return end
+  if not (self.Config.AttackAI and self.Config.AttackAI.Enabled) then 
+    _logDebug(string.format("ATTACK AI: Disabled or not configured for group '%s'", groupName or 'nil'))
+    return 
+  end
+  
+  _logDebug(string.format("ATTACK AI: Assigning attack behavior to group '%s' (%s)", 
+    groupName or 'nil', isVehicle and 'vehicle' or 'troops'))
+  
   local radius = isVehicle and (self.Config.AttackAI.VehicleSearchRadius or 5000) or (self.Config.AttackAI.TroopSearchRadius or 3000)
   local prioBase = (self.Config.AttackAI.PrioritizeEnemyBases ~= false)
   local speed = isVehicle and (self.Config.AttackAI.VehicleAdvanceSpeedKmh or 35) or (self.Config.AttackAI.TroopAdvanceSpeedKmh or 20)
   local player = 'Player'
+  
+  _logDebug(string.format("ATTACK AI: Search radius=%.0fm, prioritizeBase=%s, speed=%d km/h", 
+    radius, tostring(prioBase), speed))
+  
   -- Try to infer last requesting player from crate/troop context is complex; caller should pass announcements separately when needed.
   -- Target selection
+  -- SmartTargeting: always use omniscient nearest-target logic within radius, ignoring LOS.
+  -- We still optionally prioritize bases, but we no longer allow LOS/detection quirks to
+  -- prevent movement when enemies truly exist in the search area.
   local target
   local pickedBase
+
+  local smart = (self.Config.AttackAI and self.Config.AttackAI.SmartTargeting ~= false)
+
   if prioBase then
     local base = self:_findNearestEnemyBase(originPoint, radius)
-    if base then target = { point = base.point, name = base.name, kind = 'base', dist = base.dist } pickedBase = base end
+    if base then
+      target = { point = base.point, name = base.name, kind = 'base', dist = base.dist }
+      pickedBase = base
+      _logDebug(string.format("ATTACK AI: Found enemy base '%s' at %.0fm", base.name, base.dist))
+    end
   end
+
   if not target then
+    -- Primary omniscient search: nearest enemy ground group within radius.
     local eg = self:_findNearestEnemyGround(originPoint, radius)
-    if eg then target = { point = eg.point, name = eg.dcsGroupName, kind = 'enemy', dist = eg.dist, etype = eg.type } end
+    if eg then
+      target = { point = eg.point, name = eg.dcsGroupName, kind = 'enemy', dist = eg.dist, etype = eg.type }
+      _logDebug(string.format("ATTACK AI: Found enemy ground '%s' (%s) at %.0fm", eg.dcsGroupName, eg.type or 'unknown', eg.dist))
+    end
   end
+  
+  if not target then
+    _logDebug(string.format("ATTACK AI: No targets found within %.0fm for group '%s'", radius, groupName))
+  end
+
+  -- If SmartTargeting is disabled, simply honor the first hit (base or ground) and allow
+  -- the caller to fall back to defend when target is nil.
+  -- When SmartTargeting is enabled (default), we *only* fall back to defend when there are
+  -- truly no valid enemy bases or ground groups inside the configured radius.
+  -- (The actual omniscient search is already implemented in _findNearestEnemyBase/_findNearestEnemyGround.)
   -- Order movement if we have a target
   if target then
     self:_orderGroundGroupToPointByName(groupName, target.point, speed)
@@ -4753,6 +5003,16 @@ function CTLD:New(cfg)
   -- Initialize MEDEVAC system
   if CTLD.MEDEVAC and CTLD.MEDEVAC.Enabled then
     pcall(function() o:InitMEDEVAC() end)
+  end
+  
+  -- Initialize FARP system
+  if CTLD.FARPConfig and CTLD.FARPConfig.Enabled then
+    pcall(function() o:InitFARP() end)
+  end
+  
+  -- Initialize manual salvage crates (scan mission editor for pre-placed cargo)
+  if o.Config.SlingLoadSalvage and o.Config.SlingLoadSalvage.Enabled and o.Config.SlingLoadSalvage.EnableManualCrates then
+    pcall(function() o:ScanAndRegisterManualSalvageCrates() end)
   end
 
   -- Periodic cleanup for crates
@@ -5208,7 +5468,7 @@ function CTLD:BuildGroupMenus(group)
     table.insert(lines, '- Navigation: CTLD -> Coach & Nav -> Vectors to Nearest Pickup Zone gives bearing and range.')
     table.insert(lines, '- Activation: Zones can be active/inactive per mission logic; inactive pickup zones block crate requests.')
     table.insert(lines, '')
-    table.insert(lines, string.format('Build Radius: about %d m to collect nearby crates when building.', self.Config.BuildRadius or 60))
+    table.insert(lines, string.format('Build Radius: about %d m to collect nearby crates when building.', self.Config.BuildRadius or 100))
     table.insert(lines, string.format('Pickup Zone Max Distance: about %d m to request crates.', self.Config.PickupZoneMaxDistance or 10000))
     MESSAGE:New(table.concat(lines, '\n'), 40):ToGroup(group)
   end)
@@ -5277,7 +5537,7 @@ function CTLD:BuildGroupMenus(group)
     MESSAGE:New(table.concat(lines, '\n'), 35):ToGroup(group)
   end)
   MENU_GROUP_COMMAND:New(group, 'Build System: Build Here and Advanced', help, function()
-    local br = self.Config.BuildRadius or 60
+    local br = self.Config.BuildRadius or 100
     local win = self.Config.BuildConfirmWindowSeconds or 10
     local cd = self.Config.BuildCooldownSeconds or 60
     local lines = {}
@@ -5302,7 +5562,7 @@ function CTLD:BuildGroupMenus(group)
     MESSAGE:New(table.concat(lines, '\n'), 35):ToGroup(group)
   end)
   MENU_GROUP_COMMAND:New(group, 'SAM Sites: Building, Repairing, and Augmenting', help, function()
-    local br = self.Config.BuildRadius or 60
+    local br = self.Config.BuildRadius or 100
     local lines = {}
     table.insert(lines, 'SAM Sites - Building, Repairing, and Augmenting')
     table.insert(lines, '')
@@ -5522,6 +5782,91 @@ function CTLD:BuildGroupMenus(group)
     -- Admin/Settings submenu
     local medevacAdminRoot = MENU_GROUP:New(group, 'Admin/Settings', medevacRoot)
     CMD('Clear All MEDEVAC Missions', medevacAdminRoot, function() self:ClearAllMEDEVACMissions(group) end)
+  end
+  
+  -- Operations -> FARP
+  if CTLD.FARPConfig and CTLD.FARPConfig.Enabled then
+    local farpRoot = MENU_GROUP:New(group, 'FARP', opsRoot)
+    
+    -- Upgrade FOB to FARP
+    CMD('Upgrade FOB to FARP', farpRoot, function() self:RequestFARPUpgrade(group) end)
+    
+    -- Show FARP Status
+    CMD('Show FARP Status', farpRoot, function() self:ShowFARPStatus(group) end)
+    
+    -- Show Salvage Points
+    CMD('Coalition Salvage Points', farpRoot, function() self:ShowSalvagePoints(group) end)
+    
+    -- FARP System Guide
+    MENU_GROUP_COMMAND:New(group, 'FARP System - Guide', farpRoot, function()
+      local lines = {}
+      table.insert(lines, 'FARP System - Player Guide')
+      table.insert(lines, '')
+      table.insert(lines, 'What is FARP?')
+      table.insert(lines, '- FARP = Forward Arming and Refueling Point')
+      table.insert(lines, '- Upgrade FOBs into operational FARPs with rearm/refuel capability')
+      table.insert(lines, '- Progressive stages add equipment and expand services')
+      table.insert(lines, '- Uses coalition salvage points earned from MEDEVAC and salvage collection')
+      table.insert(lines, '')
+      table.insert(lines, 'How to Upgrade:')
+      table.insert(lines, '1. Build a FOB using normal CTLD mechanics')
+      table.insert(lines, '2. Earn salvage points (deliver MEDEVAC crews to MASH, sling-load enemy wreckage)')
+      table.insert(lines, '3. Fly to the FOB pickup zone')
+      table.insert(lines, '4. Use: Operations -> FARP -> Upgrade FOB to FARP')
+      table.insert(lines, '5. Each upgrade costs salvage and adds new equipment/services')
+      table.insert(lines, '')
+      table.insert(lines, 'FARP Stages:')
+      table.insert(lines, '')
+      table.insert(lines, 'Stage 1: Basic FARP Pad (3 salvage)')
+      table.insert(lines, '- Landing pad with command post')
+      table.insert(lines, '- Personnel tents and basic supplies')
+      table.insert(lines, '- Fuel drums and generators')
+      table.insert(lines, '- Perimeter security (sandbags)')
+      table.insert(lines, '')
+      table.insert(lines, 'Stage 2: Operational FARP (5 salvage, 8 total)')
+      table.insert(lines, '- 2x HEMTT Fuel Trucks - REFUEL CAPABILITY!')
+      table.insert(lines, '- Large fuel bladders and storage')
+      table.insert(lines, '- Upgraded command post')
+      table.insert(lines, '- Defensive barriers (Hesco walls)')
+      table.insert(lines, '- Support vehicles and power distribution')
+      table.insert(lines, '- Expanded equipment and tools')
+      table.insert(lines, '')
+      table.insert(lines, 'Stage 3: Full Forward Airbase (8 salvage, 16 total)')
+      table.insert(lines, '- 2x Ammunition Trucks - REARM CAPABILITY!')
+      table.insert(lines, '- Communications tower (SKP-11 ATC)')
+      table.insert(lines, '- Large maintenance shelter')
+      table.insert(lines, '- Complete defensive perimeter')
+      table.insert(lines, '- Watch tower for security')
+      table.insert(lines, '- Multiple supply depots')
+      table.insert(lines, '- Vehicle park with support trucks')
+      table.insert(lines, '- Unit identification markers')
+      table.insert(lines, '- Full workshop facilities')
+      table.insert(lines, '')
+      table.insert(lines, 'Services Available:')
+      table.insert(lines, '- Stage 1: Landing zone only')
+      table.insert(lines, '- Stage 2: Refuel for helicopters & ground vehicles')
+      table.insert(lines, '- Stage 3: Rearm, Refuel, Repair for all units')
+      table.insert(lines, '')
+      table.insert(lines, 'Using FARPs:')
+      table.insert(lines, '- Land or park within service radius (50-80m depending on stage)')
+      table.insert(lines, '- Services are automatic for friendly units')
+      table.insert(lines, '- Helicopters can hover-refuel at Stage 2+')
+      table.insert(lines, '- Ground vehicles automatically rearm/refuel when stopped in zone')
+      table.insert(lines, '')
+      table.insert(lines, 'Strategy Tips:')
+      table.insert(lines, '- Build FOBs in strategic locations before upgrading')
+      table.insert(lines, '- Pool salvage as a team for critical FARP upgrades')
+      table.insert(lines, '- Upgrade forward FOBs to Stage 2 for quick helicopter turnaround')
+      table.insert(lines, '- Stage 3 FARPs support sustained ground operations')
+      table.insert(lines, '- Protect your FARPs - they become high-value targets!')
+      table.insert(lines, '- Check status before upgrading: Operations -> FARP -> Show FARP Status')
+      table.insert(lines, '')
+      table.insert(lines, 'Dual Coalition:')
+      table.insert(lines, '- Each coalition has separate salvage pools')
+      table.insert(lines, '- FARPs are coalition-specific and only service friendly units')
+      table.insert(lines, '- Capture enemy territory to deny their FARP network')
+      MESSAGE:New(table.concat(lines, '\n'), 60):ToGroup(group)
+    end)
   end
 
   -- Operations (root) -> List JTAC Status (placed at bottom of Operations)
@@ -6453,7 +6798,7 @@ function CTLD:_BuildOrRefreshBuildAdvancedMenu(group, rootMenu)
   local hdgRad, _ = _headingRadDeg(unit)
   local buildOffset = math.max(0, tonumber(self.Config.BuildSpawnOffset or 0) or 0)
   local spawnAt = (buildOffset > 0) and { x = here.x + math.sin(hdgRad) * buildOffset, z = here.z + math.cos(hdgRad) * buildOffset } or { x = here.x, z = here.z }
-  local radius = self.Config.BuildRadius or 60
+  local radius = self.Config.BuildRadius or 100
   local nearby = self:GetNearbyCrates(here, radius)
   local filtered = {}
   for _,c in ipairs(nearby) do if c.meta.side == self.Side then table.insert(filtered, c) end end
@@ -6582,7 +6927,7 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
   local hdgRad, hdgDeg = _headingRadDeg(unit)
   local buildOffset = math.max(0, tonumber(self.Config.BuildSpawnOffset or 0) or 0)
   local spawnAt = (buildOffset > 0) and { x = here.x + math.sin(hdgRad) * buildOffset, z = here.z + math.cos(hdgRad) * buildOffset } or { x = here.x, z = here.z }
-  local radius = self.Config.BuildRadius or 60
+  local radius = self.Config.BuildRadius or 100
   local nearby = self:GetNearbyCrates(here, radius)
   local filtered = {}
   for _,c in ipairs(nearby) do if c.meta.side == self.Side then table.insert(filtered, c) end end
@@ -6683,7 +7028,7 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
     local function dist2(a,b)
       local dx, dz = a.x-b.x, a.z-b.z; return math.sqrt(dx*dx+dz*dz)
     end
-    local searchR = math.max(250, (self.Config.BuildRadius or 60) * 10)
+    local searchR = math.max(250, (self.Config.BuildRadius or 100) * 10)
     local groups = coalition.getGroups(tpl.side, Group.Category.GROUND) or {}
     local here2 = { x = here.x, z = here.z }
     local bestG, bestD, bestInfo = nil, 1e9, nil
@@ -7537,7 +7882,7 @@ function CTLD:InitCoalitionAdminMenu()
     table.insert(lines, '- Navigation: CTLD -> Coach & Nav -> Vectors to Nearest Pickup Zone gives bearing and range.')
     table.insert(lines, '- Activation: Zones can be active/inactive per mission logic; inactive pickup zones block crate requests.')
     table.insert(lines, '')
-    table.insert(lines, string.format('- Build Radius: about %d m to collect nearby crates when building.', self.Config.BuildRadius or 60))
+    table.insert(lines, string.format('- Build Radius: about %d m to collect nearby crates when building.', self.Config.BuildRadius or 100))
     table.insert(lines, string.format('- Pickup Zone Max Distance: about %d m to request crates (configurable).', self.Config.PickupZoneMaxDistance or 10000))
     _msgCoalition(self.Side, table.concat(lines, '\n'), 40)
   end)
@@ -7623,7 +7968,7 @@ function CTLD:InitCoalitionAdminMenu()
     _msgCoalition(self.Side, table.concat(lines, '\n'), 35)
   end)
   MENU_COALITION_COMMAND:New(self.Side, 'Build System: Build Here and Advanced', helpMenu, function()
-    local br = self.Config.BuildRadius or 60
+    local br = self.Config.BuildRadius or 100
     local win = self.Config.BuildConfirmWindowSeconds or 10
     local cd = self.Config.BuildCooldownSeconds or 60
     local lines = {}
@@ -7648,7 +7993,7 @@ function CTLD:InitCoalitionAdminMenu()
     _msgCoalition(self.Side, table.concat(lines, '\n'), 35)
   end)
   MENU_COALITION_COMMAND:New(self.Side, 'SAM Sites: Building, Repairing, and Augmenting', helpMenu, function()
-    local br = self.Config.BuildRadius or 60
+    local br = self.Config.BuildRadius or 100
     local lines = {}
     table.insert(lines, 'SAM Sites - Building, Repairing, and Augmenting')
     table.insert(lines, '')
@@ -7763,7 +8108,7 @@ function CTLD:ShowCoalitionSummary()
       local gname = g and g:getName() or u:getName() or 'Group'
       local pos = u:getPoint()
       local here = { x = pos.x, z = pos.z }
-      local radius = self.Config.BuildRadius or 60
+      local radius = self.Config.BuildRadius or 100
       local nearby = self:GetNearbyCrates(here, radius)
       local counts = {}
       for _,c in ipairs(nearby) do if c.meta.side == self.Side then counts[c.meta.key] = (counts[c.meta.key] or 0) + 1 end end
@@ -8265,113 +8610,177 @@ function CTLD:BuildAtGroup(group, opts)
 
   local insideFOBZone, fz = self:IsPointInFOBZones(here)
   local fobBlocked = false
-  -- Try composite recipes first (requires is a map of key->qty)
-  for recipeKey,cat in pairs(self.Config.CrateCatalog) do
-    if type(cat.requires) == 'table' and cat.build then
-      if cat.isFOB and self.Config.RestrictFOBToZones and not insideFOBZone then
-        fobBlocked = true
-      else
-        -- Build caps disabled: rely solely on inventory/catalog control
-        local ok = true
-        for reqKey,qty in pairs(cat.requires) do
-          if (counts[reqKey] or 0) < qty then ok = false; break end
-        end
-        if ok then
-          local gdata = cat.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, cat.side or self.Side)
-          _eventSend(self, group, nil, 'build_started', { build = cat.description or recipeKey })
-          local g = _coalitionAddGroup(cat.side or self.Side, cat.category or Group.Category.GROUND, gdata, self.Config)
-          if g then
-            if self.Config.JTAC and self.Config.JTAC.Verbose then
-              _logInfo(string.format('JTAC trace: composite build spawned group=%s recipe=%s', tostring(g:getName()), tostring(recipeKey)))
-            end
-            -- Register JTAC if applicable (composite recipe)
-            self:_maybeRegisterJTAC(recipeKey, cat, g)
-            for reqKey,qty in pairs(cat.requires) do consumeCrates(reqKey, qty) end
-            -- No site cap counters when caps are disabled
-            _eventSend(self, nil, self.Side, 'build_success_coalition', { build = cat.description or recipeKey, player = _playerNameFromGroup(group) })
-            -- If this was a FOB, register a new pickup zone with reduced stock
-            if cat.isFOB then
-              pcall(function()
-                self:_CreateFOBPickupZone({ x = spawnAt.x, z = spawnAt.z }, cat, hdg)
-              end)
-            end
-            -- Assign optional behavior for built vehicles/groups
-            local behavior = opts and opts.behavior or nil
-            if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
-              local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
-              local isMetric = _getPlayerIsMetric(group:GetUnit(1))
-              if t and t.kind == 'base' then
-                local brg = _bearingDeg({ x = spawnAt.x, z = spawnAt.z }, { x = t.point.x, z = t.point.z })
-                local v, u = _fmtRange(t.dist or 0, isMetric)
-                _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
-              elseif t and t.kind == 'enemy' then
-                local brg = _bearingDeg({ x = spawnAt.x, z = spawnAt.z }, { x = t.point.x, z = t.point.z })
-                local v, u = _fmtRange(t.dist or 0, isMetric)
-                _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
-              else
-                local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
-                _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+  
+  -- Build All mode: when BuildCooldownSeconds = 0, loop and build all available assets
+  local buildAllMode = (tonumber(self.Config.BuildCooldownSeconds) or 0) == 0
+  local builtCount = 0
+  local buildLoop = true
+  
+  -- Helper to calculate dispersed spawn position for Build All mode
+  local function getDispersedSpawnPoint(basePoint, isFOB)
+    -- FOBs always spawn at the designated point (no dispersion)
+    if isFOB then
+      return { x = basePoint.x, z = basePoint.z }
+    end
+    
+    -- In Build All mode with dispersion enabled, randomize spawn position
+    if buildAllMode and (self.Config.BuildDispersionRadius or 0) > 0 then
+      local dispRadius = self.Config.BuildDispersionRadius
+      -- Random angle (0-360 degrees)
+      local angle = math.random() * 2 * math.pi
+      -- Random distance (0 to dispRadius, with bias toward outer ring for better spread)
+      local distance = math.sqrt(math.random()) * dispRadius
+      return {
+        x = basePoint.x + math.cos(angle) * distance,
+        z = basePoint.z + math.sin(angle) * distance
+      }
+    end
+    
+    -- Default: use base point
+    return { x = basePoint.x, z = basePoint.z }
+  end
+  
+  while buildLoop do
+    buildLoop = false -- Only loop if we successfully build something in Build All mode
+    
+    -- Try composite recipes first (requires is a map of key->qty)
+    for recipeKey,cat in pairs(self.Config.CrateCatalog) do
+      if type(cat.requires) == 'table' and cat.build then
+        if cat.isFOB and self.Config.RestrictFOBToZones and not insideFOBZone then
+          fobBlocked = true
+        else
+          -- Build caps disabled: rely solely on inventory/catalog control
+          local ok = true
+          for reqKey,qty in pairs(cat.requires) do
+            if (counts[reqKey] or 0) < qty then ok = false; break end
+          end
+          if ok then
+            -- Calculate spawn position (with dispersion for non-FOB builds in Build All mode)
+            local actualSpawn = getDispersedSpawnPoint(spawnAt, cat.isFOB)
+            local gdata = cat.build({ x = actualSpawn.x, z = actualSpawn.z }, hdgDeg, cat.side or self.Side)
+            _eventSend(self, group, nil, 'build_started', { build = cat.description or recipeKey })
+            local g = _coalitionAddGroup(cat.side or self.Side, cat.category or Group.Category.GROUND, gdata, self.Config)
+            if g then
+              if self.Config.JTAC and self.Config.JTAC.Verbose then
+                _logInfo(string.format('JTAC trace: composite build spawned group=%s recipe=%s', tostring(g:getName()), tostring(recipeKey)))
               end
+              -- Register JTAC if applicable (composite recipe)
+              self:_maybeRegisterJTAC(recipeKey, cat, g)
+              for reqKey,qty in pairs(cat.requires) do 
+                consumeCrates(reqKey, qty)
+                counts[reqKey] = math.max(0, (counts[reqKey] or 0) - qty)
+              end
+              builtCount = builtCount + 1
+              -- No site cap counters when caps are disabled
+              _eventSend(self, nil, self.Side, 'build_success_coalition', { build = cat.description or recipeKey, player = _playerNameFromGroup(group) })
+              -- If this was a FOB, register a new pickup zone with reduced stock
+              if cat.isFOB then
+                pcall(function()
+                  self:_CreateFOBPickupZone({ x = actualSpawn.x, z = actualSpawn.z }, cat, hdg)
+                end)
+              end
+              -- Assign optional behavior for built vehicles/groups
+              local behavior = opts and opts.behavior or nil
+              if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
+                local t = self:_assignAttackBehavior(g:getName(), actualSpawn, true)
+                local isMetric = _getPlayerIsMetric(group:GetUnit(1))
+                if t and t.kind == 'base' then
+                  local brg = _bearingDeg({ x = actualSpawn.x, z = actualSpawn.z }, { x = t.point.x, z = t.point.z })
+                  local v, u = _fmtRange(t.dist or 0, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
+                elseif t and t.kind == 'enemy' then
+                  local brg = _bearingDeg({ x = actualSpawn.x, z = actualSpawn.z }, { x = t.point.x, z = t.point.z })
+                  local v, u = _fmtRange(t.dist or 0, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
+                else
+                  local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+                end
+              end
+              if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
+              if buildAllMode then
+                buildLoop = true -- Continue building in Build All mode
+                break -- Break from recipe loop to restart search
+              else
+                return -- Single build mode - return after first build
+              end
+            else
+              _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' })
+              return
             end
-            if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
-            return
+          end
+    -- continue_composite (Lua 5.1 compatible: no labels)
+        end
+      end
+    end
+
+    -- Then single-key recipes (only if we didn't build a composite)
+    if not buildLoop or not buildAllMode then
+      for key,count in pairs(counts) do
+        local cat = self.Config.CrateCatalog[key]
+        if cat and cat.build and (not cat.requires) and count >= (cat.required or 1) then
+          if cat.isFOB and self.Config.RestrictFOBToZones and not insideFOBZone then
+            fobBlocked = true
           else
-            _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' })
-            return
+            -- Build caps disabled: rely solely on inventory/catalog control
+            -- Calculate spawn position (with dispersion for non-FOB builds in Build All mode)
+            local actualSpawn = getDispersedSpawnPoint(spawnAt, cat.isFOB)
+            local gdata = cat.build({ x = actualSpawn.x, z = actualSpawn.z }, hdgDeg, cat.side or self.Side)
+            _eventSend(self, group, nil, 'build_started', { build = cat.description or key })
+            local g = _coalitionAddGroup(cat.side or self.Side, cat.category or Group.Category.GROUND, gdata, self.Config)
+            if g then
+              if self.Config.JTAC and self.Config.JTAC.Verbose then
+                _logInfo(string.format('JTAC trace: single build spawned group=%s key=%s', tostring(g:getName()), tostring(key)))
+              end
+              -- Register JTAC if applicable (single-unit recipe)
+              self:_maybeRegisterJTAC(key, cat, g)
+              consumeCrates(key, cat.required or 1)
+              counts[key] = math.max(0, (counts[key] or 0) - (cat.required or 1))
+              builtCount = builtCount + 1
+              -- No single-unit cap counters when caps are disabled
+              _eventSend(self, nil, self.Side, 'build_success_coalition', { build = cat.description or key, player = _playerNameFromGroup(group) })
+              -- Assign optional behavior for built vehicles/groups
+              local behavior = opts and opts.behavior or nil
+              if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
+                local t = self:_assignAttackBehavior(g:getName(), actualSpawn, true)
+                local isMetric = _getPlayerIsMetric(group:GetUnit(1))
+                if t and t.kind == 'base' then
+                  local brg = _bearingDeg({ x = actualSpawn.x, z = actualSpawn.z }, { x = t.point.x, z = t.point.z })
+                  local v, u = _fmtRange(t.dist or 0, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
+                elseif t and t.kind == 'enemy' then
+                  local brg = _bearingDeg({ x = actualSpawn.x, z = actualSpawn.z }, { x = t.point.x, z = t.point.z })
+                  local v, u = _fmtRange(t.dist or 0, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
+                else
+                  local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
+                  _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+                end
+              end
+              if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
+              if buildAllMode then
+                buildLoop = true -- Continue building in Build All mode
+                break -- Break from counts loop to restart search
+              else
+                return -- Single build mode - return after first build
+              end
+            else
+              _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' })
+              return
+            end
           end
         end
-  -- continue_composite (Lua 5.1 compatible: no labels)
+    -- continue_single (Lua 5.1 compatible: no labels)
       end
     end
   end
-
-  -- Then single-key recipes
-  for key,count in pairs(counts) do
-    local cat = self.Config.CrateCatalog[key]
-    if cat and cat.build and (not cat.requires) and count >= (cat.required or 1) then
-      if cat.isFOB and self.Config.RestrictFOBToZones and not insideFOBZone then
-        fobBlocked = true
-      else
-        -- Build caps disabled: rely solely on inventory/catalog control
-  local gdata = cat.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, cat.side or self.Side)
-        _eventSend(self, group, nil, 'build_started', { build = cat.description or key })
-        local g = _coalitionAddGroup(cat.side or self.Side, cat.category or Group.Category.GROUND, gdata, self.Config)
-        if g then
-          if self.Config.JTAC and self.Config.JTAC.Verbose then
-            _logInfo(string.format('JTAC trace: single build spawned group=%s key=%s', tostring(g:getName()), tostring(key)))
-          end
-          -- Register JTAC if applicable (single-unit recipe)
-          self:_maybeRegisterJTAC(key, cat, g)
-          consumeCrates(key, cat.required or 1)
-          -- No single-unit cap counters when caps are disabled
-          _eventSend(self, nil, self.Side, 'build_success_coalition', { build = cat.description or key, player = _playerNameFromGroup(group) })
-          -- Assign optional behavior for built vehicles/groups
-          local behavior = opts and opts.behavior or nil
-          if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
-            local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
-            local isMetric = _getPlayerIsMetric(group:GetUnit(1))
-            if t and t.kind == 'base' then
-              local brg = _bearingDeg({ x = spawnAt.x, z = spawnAt.z }, { x = t.point.x, z = t.point.z })
-              local v, u = _fmtRange(t.dist or 0, isMetric)
-              _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
-            elseif t and t.kind == 'enemy' then
-              local brg = _bearingDeg({ x = spawnAt.x, z = spawnAt.z }, { x = t.point.x, z = t.point.z })
-              local v, u = _fmtRange(t.dist or 0, isMetric)
-              _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
-            else
-              local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
-              _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
-            end
-          end
-          if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
-          return
-        else
-          _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' })
-          return
-        end
-      end
+  
+  -- If we built anything in Build All mode, we're done successfully
+  if builtCount > 0 then
+    if buildAllMode then
+      _msgGroup(group, string.format('Build All complete: deployed %d asset(s).', builtCount))
     end
-  -- continue_single (Lua 5.1 compatible: no labels)
+    return
   end
 
   if fobBlocked then
@@ -9931,7 +10340,11 @@ function CTLD:UnloadTroops(group, opts)
     
     -- Assign optional behavior
     local behavior = opts and opts.behavior or nil
+    _logDebug(string.format("TROOP DEPLOY: Group '%s' spawned with behavior='%s'", 
+      spawned:getName(), tostring(behavior)))
+    
     if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
+      _logDebug(string.format("TROOP DEPLOY: Initiating attack behavior for '%s'", spawned:getName()))
       local t = self:_assignAttackBehavior(spawned:getName(), center, false)
       -- Announce intentions globally
       local isMetric = _getPlayerIsMetric(group:GetUnit(1))
@@ -10139,6 +10552,456 @@ function CTLD:_CreateFOBPickupZone(point, cat, hdg)
   end
 end
 -- #endregion Inventory helpers
+
+-- =========================
+-- FARP System
+-- =========================
+-- #region FARP
+
+-- Initialize FARP system (called from CTLD:New)
+function CTLD:InitFARP()
+  if not (CTLD.FARPConfig and CTLD.FARPConfig.Enabled) then return end
+  _logInfo('FARP system initialized')
+end
+
+-- Get FARP data for a FOB zone
+function CTLD:GetFARPData(zoneName)
+  if not zoneName then return nil end
+  return CTLD._farpData[zoneName]
+end
+
+-- Find nearest FOB pickup zone to a point
+function CTLD:FindNearestFOBZone(point)
+  local nearestZone = nil
+  local nearestDist = math.huge
+  
+  for _, zone in ipairs(self.PickupZones or {}) do
+    local zname = zone:GetName()
+    -- Check if this is a FOB zone (starts with FOB_PZ_)
+    if zname and zname:match('^FOB_PZ_') then
+      local zoneCenter = zone:GetVec2()
+      local dist = ((point.x - zoneCenter.x)^2 + (point.z - zoneCenter.y)^2)^0.5
+      local radius = self:_getZoneRadius(zone)
+      
+      if dist < (radius + 50) and dist < nearestDist then
+        nearestZone = zone
+        nearestDist = dist
+      end
+    end
+  end
+  
+  return nearestZone, nearestDist
+end
+
+-- Spawn static objects for a FARP stage
+function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalition)
+  if not (CTLD.FARPConfig and CTLD.FARPConfig.StageLayouts[stage]) then
+    _logError(string.format('Invalid FARP stage %d or missing layout config', stage))
+    return false
+  end
+  
+  local layout = CTLD.FARPConfig.StageLayouts[stage]
+  local farpData = CTLD._farpData[zoneName] or { stage = 0, statics = {}, coalition = coalition }
+  
+  _logInfo(string.format('Spawning FARP Stage %d statics for zone %s (coalition %d)', stage, zoneName, coalition))
+  
+  -- Get coalition name for DCS
+  local coalitionName = (coalition == coalition.side.BLUE) and 'blue' or 'red'
+  
+  for _, obj in ipairs(layout) do
+    -- Calculate world position from relative offset
+    local worldX = centerPoint.x + obj.x
+    local worldZ = centerPoint.z + obj.z
+    local worldY = land.getHeight({x = worldX, y = worldZ})
+    
+    -- Generate unique name
+    local staticName = string.format('FARP_%s_S%d_%s_%d', zoneName, stage, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
+    
+    -- Create static object data
+    local staticData = {
+      ["type"] = obj.type,
+      ["name"] = staticName,
+      ["heading"] = math.rad(obj.heading or 0),
+      ["x"] = worldX,
+      ["y"] = worldZ,
+      ["category"] = "Fortifications",
+      ["canCargo"] = false,
+      ["shape_name"] = "",
+      ["rate"] = 100,
+    }
+    
+    -- Spawn the static
+    local success, staticObj = pcall(function()
+      return coalition.addStaticObject(coalition, staticData)
+    end)
+    
+    if success and staticObj then
+      table.insert(farpData.statics, staticName)
+      _logDebug(string.format('Spawned FARP static: %s at (%.1f, %.1f)', staticName, worldX, worldZ))
+    else
+      _logError(string.format('Failed to spawn FARP static: %s (%s)', obj.type, tostring(staticObj)))
+    end
+  end
+  
+  farpData.stage = stage
+  farpData.coalition = coalition
+  CTLD._farpData[zoneName] = farpData
+  
+  _logInfo(string.format('FARP Stage %d complete for zone %s - spawned %d statics', stage, zoneName, #farpData.statics))
+  return true
+end
+
+-- Upgrade a FOB to the next FARP stage
+function CTLD:UpgradeFARP(group, zoneName)
+  if not (CTLD.FARPConfig and CTLD.FARPConfig.Enabled) then
+    MESSAGE:New('FARP system is disabled.', 10):ToGroup(group)
+    return
+  end
+  
+  local farpData = CTLD._farpData[zoneName] or { stage = 0, statics = {}, coalition = self.Side }
+  local currentStage = farpData.stage or 0
+  local nextStage = currentStage + 1
+  
+  -- Check if already maxed
+  if nextStage > 3 then
+    _eventSend(self, group, nil, 'farp_already_maxed', {})
+    return
+  end
+  
+  -- Get upgrade cost
+  local upgradeCost = CTLD.FARPConfig.StageCosts[nextStage]
+  if not upgradeCost then
+    MESSAGE:New(string.format('Invalid FARP stage %d', nextStage), 10):ToGroup(group)
+    return
+  end
+  
+  -- Check salvage points
+  local currentSalvage = CTLD._salvagePoints[self.Side] or 0
+  if currentSalvage < upgradeCost then
+    _eventSend(self, group, nil, 'farp_upgrade_insufficient_salvage', {
+      stage = nextStage,
+      need = upgradeCost,
+      current = currentSalvage
+    })
+    return
+  end
+  
+  -- Find the zone to get center point
+  local zone = nil
+  for _, z in ipairs(self.PickupZones or {}) do
+    if z:GetName() == zoneName then
+      zone = z
+      break
+    end
+  end
+  
+  if not zone then
+    MESSAGE:New('FOB zone not found!', 10):ToGroup(group)
+    return
+  end
+  
+  local center = zone:GetVec2()
+  local centerPoint = { x = center.x, z = center.y }
+  
+  -- Deduct salvage
+  CTLD._salvagePoints[self.Side] = currentSalvage - upgradeCost
+  
+  -- Spawn statics for this stage
+  _eventSend(self, group, nil, 'farp_upgrade_started', { stage = nextStage })
+  
+  local success = self:SpawnFARPStatics(zoneName, nextStage, centerPoint, self.Side)
+  
+  if success then
+    -- Determine services available
+    local services = {}
+    if nextStage >= 1 then table.insert(services, 'Landing Zone') end
+    if nextStage >= 2 then table.insert(services, 'Refuel') end
+    if nextStage >= 3 then 
+      table.insert(services, 'Rearm')
+      table.insert(services, 'Repair')
+    end
+    
+    _eventSend(self, nil, self.Side, 'farp_upgrade_complete', {
+      player = _playerNameFromGroup(group),
+      stage = nextStage,
+      services = table.concat(services, ', ')
+    })
+    
+    -- Create or update FARP service zone
+    self:CreateFARPServiceZone(zoneName, centerPoint, nextStage)
+    
+    _logInfo(string.format('%s upgraded FOB %s to FARP Stage %d (cost: %d salvage)', 
+      _playerNameFromGroup(group), zoneName, nextStage, upgradeCost))
+  else
+    -- Refund salvage on failure
+    CTLD._salvagePoints[self.Side] = currentSalvage
+    MESSAGE:New('FARP upgrade failed! Salvage refunded.', 15):ToGroup(group)
+  end
+end
+
+-- Create FARP service zone for rearm/refuel
+function CTLD:CreateFARPServiceZone(zoneName, centerPoint, stage)
+  if stage < 2 then return end -- Only stages 2+ have services
+  
+  local radius = CTLD.FARPConfig.ServiceRadius[stage] or 50
+  local farpZoneName = string.format('%s_FARP_Service', zoneName)
+  
+  -- Create zone
+  local v2 = (VECTOR2 and VECTOR2.New) and VECTOR2:New(centerPoint.x, centerPoint.z) or { x = centerPoint.x, y = centerPoint.z }
+  local serviceZone = ZONE_RADIUS:New(farpZoneName, v2, radius)
+  
+  CTLD._farpZones[farpZoneName] = {
+    zone = serviceZone,
+    side = self.Side,
+    stage = stage,
+    parentFOB = zoneName
+  }
+  
+  -- Start service scheduler
+  self:StartFARPServices(farpZoneName)
+  
+  _logInfo(string.format('Created FARP service zone %s (radius: %dm, stage: %d)', farpZoneName, radius, stage))
+end
+
+-- Start FARP service scheduler
+function CTLD:StartFARPServices(farpZoneName)
+  local farpInfo = CTLD._farpZones[farpZoneName]
+  if not farpInfo then return end
+  
+  local selfref = self
+  
+  -- Service scheduler runs every 5 seconds
+  SCHEDULER:New(nil, function()
+    local zone = farpInfo.zone
+    if not zone then return end
+    
+    local stage = farpInfo.stage
+    local units = zone:GetScannedUnits()
+    
+    for _, unit in ipairs(units or {}) do
+      if unit and unit:IsAlive() then
+        local unitCoalition = unit:GetCoalition()
+        
+        -- Only service friendly units
+        if unitCoalition == farpInfo.side then
+          local unitType = unit:GetTypeName()
+          local group = unit:GetGroup()
+          
+          -- Service helicopters and ground vehicles
+          if group and (unit:IsHelicopter() or unit:IsGround()) then
+            -- Stage 2+: Refuel
+            if stage >= 2 then
+              -- Trigger refuel (DCS built-in command)
+              pcall(function()
+                local controller = unit:GetUnit():getController()
+                if controller then
+                  controller:setCommand({
+                    id = 'RefuelInFlight',
+                    params = {}
+                  })
+                end
+              end)
+            end
+            
+            -- Stage 3: Rearm and Repair
+            if stage >= 3 then
+              pcall(function()
+                local dcsUnit = unit:GetUnit()
+                if dcsUnit then
+                  -- Note: DCS doesn't have direct Lua API for ground rearm/repair
+                  -- This simulates the presence of the service zone
+                  -- In practice, DCS may auto-service units near FARP statics
+                end
+              end)
+            end
+          end
+        end
+      end
+    end
+  end, {}, 0, 5) -- Start immediately, repeat every 5 seconds
+  
+  _logDebug(string.format('FARP service scheduler started for %s', farpZoneName))
+end
+
+-- Show FARP status for nearby FOB
+function CTLD:ShowFARPStatus(group)
+  local unit = group:GetUnit(1)
+  if not unit then return end
+  
+  local pos = unit:GetVec3()
+  local point = { x = pos.x, z = pos.z }
+  
+  local fobZone, dist = self:FindNearestFOBZone(point)
+  
+  if not fobZone then
+    _eventSend(self, group, nil, 'farp_not_at_fob', {})
+    return
+  end
+  
+  local zoneName = fobZone:GetName()
+  local farpData = CTLD._farpData[zoneName] or { stage = 0 }
+  local currentStage = farpData.stage or 0
+  
+  if currentStage >= 3 then
+    -- Fully upgraded
+    local services = 'Landing Zone, Refuel, Rearm, Repair'
+    _eventSend(self, group, nil, 'farp_status_maxed', {
+      stage = currentStage,
+      max_stage = 3,
+      services = services
+    })
+  elseif currentStage > 0 then
+    -- Partially upgraded
+    local services = {}
+    if currentStage >= 1 then table.insert(services, 'Landing Zone') end
+    if currentStage >= 2 then table.insert(services, 'Refuel') end
+    if currentStage >= 3 then 
+      table.insert(services, 'Rearm')
+      table.insert(services, 'Repair')
+    end
+    
+    local nextStage = currentStage + 1
+    local nextCost = CTLD.FARPConfig.StageCosts[nextStage] or 0
+    
+    _eventSend(self, group, nil, 'farp_status', {
+      stage = currentStage,
+      max_stage = 3,
+      services = table.concat(services, ', '),
+      next_cost = nextCost,
+      next_stage = nextStage
+    })
+  else
+    -- Base FOB, not yet upgraded
+    local nextCost = CTLD.FARPConfig.StageCosts[1] or 0
+    MESSAGE:New(string.format('FOB Status: Base FOB (not upgraded)\nUpgrade to FARP Stage 1 for %d salvage points.\n\nCurrent salvage: %d', 
+      nextCost, CTLD._salvagePoints[self.Side] or 0), 15):ToGroup(group)
+  end
+end
+
+-- Request FARP upgrade from menu
+function CTLD:RequestFARPUpgrade(group)
+  local unit = group:GetUnit(1)
+  if not unit then return end
+  
+  local pos = unit:GetVec3()
+  local point = { x = pos.x, z = pos.z }
+  
+  local fobZone, dist = self:FindNearestFOBZone(point)
+  
+  if not fobZone then
+    _eventSend(self, group, nil, 'farp_not_at_fob', {})
+    return
+  end
+  
+  local zoneName = fobZone:GetName()
+  self:UpgradeFARP(group, zoneName)
+end
+
+-- #endregion FARP
+
+-- =========================
+-- Sling-Load Salvage - Manual Crate Support
+-- =========================
+-- #region Manual Salvage Crates
+
+-- Scan mission editor for pre-placed cargo statics and register them as salvage
+function CTLD:ScanAndRegisterManualSalvageCrates()
+  local cfg = self.Config.SlingLoadSalvage
+  if not (cfg and cfg.Enabled and cfg.EnableManualCrates) then return end
+  
+  local prefix = cfg.ManualCratePrefix or 'SALVAGE-'
+  local registered = 0
+  
+  _logInfo('[ManualSalvage] Scanning for pre-placed salvage crates...')
+  
+  -- Get all static objects in the mission
+  local allStatics = {}
+  for _, coalitionSide in pairs({coalition.side.BLUE, coalition.side.RED, coalition.side.NEUTRAL}) do
+    local groups = coalition.getStaticObjects(coalitionSide) or {}
+    for _, static in pairs(groups) do
+      table.insert(allStatics, {obj = static, side = coalitionSide})
+    end
+  end
+  
+  for _, staticData in ipairs(allStatics) do
+    local static = staticData.obj
+    local staticSide = staticData.side
+    
+    if static and static:isExist() then
+      local staticName = static:getName()
+      
+      -- Check if name starts with salvage prefix
+      if staticName and staticName:sub(1, #prefix) == prefix then
+        -- Check if it's a slingloadable cargo type
+        local typeName = static:getTypeName()
+        local isCargo = false
+        for _, cargoType in ipairs(cfg.CargoTypes or {}) do
+          if typeName == cargoType then
+            isCargo = true
+            break
+          end
+        end
+        
+        if isCargo then
+          -- Parse the name to extract information
+          -- Expected format: SALVAGE-{B|R}-{WEIGHT}KG-{ID}
+          -- Example: SALVAGE-B-2000KG-CRASH01
+          local sideChar, weightStr, id = staticName:match('^SALVAGE%-([BR])%-(%d+)KG%-(.+)$')
+          
+          if sideChar and weightStr then
+            local collectingSide = (sideChar == 'B') and coalition.side.BLUE or coalition.side.RED
+            local weight = tonumber(weightStr) or 1000
+            
+            -- Calculate reward based on weight class
+            local rewardPer500kg = 3 -- default medium rate
+            for _, wc in ipairs(cfg.WeightClasses or {}) do
+              if weight >= wc.min and weight <= wc.max then
+                rewardPer500kg = wc.rewardPer500kg or 3
+                break
+              end
+            end
+            local rewardValue = math.floor((weight / 500) * rewardPer500kg)
+            
+            -- Get position
+            local pos = static:getPoint()
+            local position = {x = pos.x, z = pos.z}
+            
+            -- Register the crate (no expiration for manual crates)
+            CTLD._salvageCrates[staticName] = {
+              side = collectingSide,
+              weight = weight,
+              spawnTime = timer.getTime(),
+              position = position,
+              initialHealth = 1.0,
+              rewardValue = rewardValue,
+              warningsSent = {},
+              staticObject = static,
+              crateClass = 'Manual',
+              isManual = true,  -- Flag to skip expiration checks
+            }
+            
+            registered = registered + 1
+            _logInfo(string.format('[ManualSalvage] Registered: %s (Side=%s, Weight=%dkg, Reward=%dpts)', 
+              staticName, sideChar, weight, rewardValue))
+          else
+            _logVerbose(string.format('[ManualSalvage] Skipping %s - invalid name format (use: SALVAGE-{B|R}-####KG-ID)', staticName))
+          end
+        else
+          _logVerbose(string.format('[ManualSalvage] Skipping %s - not a cargo type (found: %s)', staticName, tostring(typeName)))
+        end
+      end
+    end
+  end
+  
+  if registered > 0 then
+    _logInfo(string.format('[ManualSalvage] Registered %d manual salvage crate(s)', registered))
+    _msgCoalition(self.Side, _fmtTemplate(self.Messages.slingload_manual_crates_registered, {count = registered}))
+  else
+    _logInfo('[ManualSalvage] No manual salvage crates found')
+  end
+end
+
+-- #endregion Manual Salvage Crates
 
 -- =========================
 -- MEDEVAC System
@@ -13447,8 +14310,8 @@ function CTLD:_CheckSlingLoadSalvageCrates()
       local elapsed = now - meta.spawnTime
       local lifetime = cfg.CrateLifetime or 10800
       
-      -- Check for expiration
-      if elapsed >= lifetime then
+      -- Check for expiration (skip for manual crates)
+      if elapsed >= lifetime and not meta.isManual then
         table.insert(cratesToRemove, crateName)
         
         -- Update stats
@@ -13470,10 +14333,11 @@ function CTLD:_CheckSlingLoadSalvageCrates()
         _logVerbose(string.format('[SlingLoadSalvage] Crate %s expired', crateName))
         
       else
-        -- Check for warnings
-        local remaining = lifetime - elapsed
-        for _, warnTime in ipairs(cfg.WarningTimes or { 1800, 300 }) do
-          if remaining <= warnTime and not meta.warningsSent[warnTime] then
+        -- Check for warnings (skip for manual crates)
+        if not meta.isManual then
+          local remaining = lifetime - elapsed
+          for _, warnTime in ipairs(cfg.WarningTimes or { 1800, 300 }) do
+            if remaining <= warnTime and not meta.warningsSent[warnTime] then
             meta.warningsSent[warnTime] = true
             local grid = self:_GetMGRSString(meta.position)
             local msgKey = (warnTime >= 1800) and 'slingload_salvage_warn_30min' or 'slingload_salvage_warn_5min'
@@ -13483,6 +14347,7 @@ function CTLD:_CheckSlingLoadSalvageCrates()
               weight = meta.weight,
             })
             _msgCoalition(meta.side, msg)
+            end
           end
         end
         
