@@ -18,7 +18,7 @@
 -- #region Config
 
 local CTLD = {}
-CTLD.Version = '1.0.1'
+CTLD.Version = '1.0.2'
 CTLD.__index = CTLD
 CTLD._lastSalvageInterval = CTLD._lastSalvageInterval or 0
 CTLD._playerUnitPrefs = CTLD._playerUnitPrefs or {}
@@ -122,6 +122,42 @@ CTLD.Messages = {
   medevac_crew_delivered_mash = "{player} delivered {vehicle} crew to MASH. Earned {salvage} salvage points! Coalition total: {total}.",
   medevac_crew_timeout = "MEDEVAC FAILED: {vehicle} crew at {grid} KIA - no rescue attempted. Vehicle lost.",
   medevac_crew_killed = "MEDEVAC FAILED: {vehicle} crew killed in action. Vehicle lost.",
+  medevac_crew_killed_lines = {
+    "Stranded Crew ({vehicle} @ {grid}): We're taking heavy fire—where's that bird— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Ahh— we're under fire— we can't h— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): They're right on top of us— we won't ho— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Rounds incoming— this is it boys— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): If you hear this, we didn't make— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): No more cover! We can't hold— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): This is it— tell them we tried— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): They're all around us— oh God— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): Taking direct hits— we're not walking out of— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Where's that ride— we're pinned— we can't— *boom*",
+    -- New Mo-blame lines
+    "Stranded Crew ({vehicle} @ {grid}): Mo said this LZ was 'low threat'—remind him how that turned out— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Copy, still no bird—did Mo forget to file the MEDEVAC again?— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): We only took this route because Mo said it was 'shortcut friendly'— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Tell Mo his ‘won’t be hot for long’ brief was a lie— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): Command, if Mo planned this exfil, we’d like a refund— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Mo promised we’d be home for chow—guess we’re staying for artillery instead— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): We’re still at {grid}—unless Mo ‘optimized’ the coordinates again— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Whoever let Mo pick this landing zone owes us new helmets— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): Be advised, Mo’s ‘safe corridor’ is mostly explosions right now— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): If the bird’s lost, check if Mo touched the map— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): This is what we get for trusting Mo’s weather call— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Mo swore enemy armor ‘never comes this far’—they’re waving at us— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): We’re painted from every angle—next time, maybe don’t let Mo do the route card— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): If Mo filed our grid as a coffee break, we’re gonna haunt him— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): Radio check—anyone but Mo on comms? We’d like a real pickup— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Mo said ‘in and out, easy day’—we’re on hour one of ‘not easy’— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): Still no rotors—ask Mo if he scheduled this MEDEVAC for tomorrow— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): If Mo’s running the flight schedule, tell him we’re fresh out of patience— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): Mo briefed ‘minimal contact’—we’re currently meeting the entire enemy battalion— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): Rescue bird, if you’re circling, that’s Mo’s navigation, not ours— *explosion*",
+    "Stranded Crew ({vehicle} @ {grid}): We popped smoke twice—maybe Mo told them to ignore it— *static*",
+    "Stranded Crew ({vehicle} @ {grid}): If they ask how we got stuck here, just say ‘Mo’—they’ll understand— *boom*",
+    "Stranded Crew ({vehicle} @ {grid}): Mo said ‘what’s the worst that could happen’—tell him he’s about to find out— *static*",
+  },
   medevac_no_requests = "No active MEDEVAC requests.",
   medevac_vectors = "MEDEVAC: {vehicle} crew bearing {brg}°, range {rng} {rng_u}. Time remaining: {time_remain} mins.",
   medevac_salvage_status = "Coalition Salvage Points: {points}. Use salvage to build out-of-stock items.",
@@ -404,7 +440,7 @@ CTLD.Config = {
   BuildConfirmEnabled = false,           -- require a second confirmation within a short window before building
   BuildConfirmWindowSeconds = 30,        -- seconds allowed between first and second "Build Here" press
   BuildCooldownEnabled = true,           -- impose a cooldown before allowing another build by the same group
-  BuildCooldownSeconds = 60,             -- seconds of cooldown after a successful build per group
+  BuildCooldownSeconds = 0,             -- seconds of cooldown after a successful build per group
 
   -- === Pickup & Drop Zone Rules ===
   RequirePickupZoneForCrateRequest = true, -- enforce that crate requests must be near a Supply (Pickup) Zone
@@ -1025,6 +1061,7 @@ CTLD.MEDEVAC = {
   CrewImmortalDuringDelay = true, -- make crew immortal (invulnerable) during announcement delay to prevent early death
   CrewInvisibleDuringDelay = true, -- make crew invisible to AI during announcement delay (won't be targeted by enemy)
   CrewImmortalAfterAnnounce = false, -- if true, crew stays immortal even after announcing mission (easier gameplay)
+  KeepCrewInvisibleForLifetime = true, -- if true, keep crew invisible to AI for entire mission lifetime
   
   -- Smoke signals
   PopSmokeOnSpawn = true,         -- crew pops smoke when they first spawn
@@ -5531,7 +5568,14 @@ function CTLD:BuildGroupMenus(group)
     end)
 
     local buildRoot = MENU_GROUP:New(group, 'Build Menu', logRoot)
-    CMD('Build Here', buildRoot, function() self:BuildAtGroup(group) end)
+    local cd = tonumber(self.Config.BuildCooldownSeconds) or 0
+    local buildHereLabel
+    if cd <= 0 then
+      buildHereLabel = 'Build All Here'
+    else
+      buildHereLabel = string.format('Build Here (w/%ds throttle)', cd)
+    end
+    CMD(buildHereLabel, buildRoot, function() self:BuildAtGroup(group) end)
     self:_BuildOrRefreshBuildAdvancedMenu(group, buildRoot)
     MENU_GROUP_COMMAND:New(group, 'Refresh Buildable List', buildRoot, function()
       self:_BuildOrRefreshBuildAdvancedMenu(group, buildRoot)
@@ -6473,13 +6517,22 @@ function CTLD:_BuildOrRefreshBuildAdvancedMenu(group, rootMenu)
   for _,it in ipairs(items) do
     local label = (it.def and (it.def.menu or it.def.description)) or it.key
     local perItem = MENU_GROUP:New(group, label, dynRoot)
+    local cd = tonumber(self.Config.BuildCooldownSeconds) or 0
+    local holdTitle, attackTitle
+    if cd <= 0 then
+      holdTitle = 'Build All [Hold Position]'
+      attackTitle = string.format('Build All [Attack (%dm)]', (self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000)
+    else
+      holdTitle = string.format('Build (w/%ds throttle) [Hold Position]', cd)
+      attackTitle = string.format('Build (w/%ds throttle) [Attack (%dm)]', cd, (self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000)
+    end
     -- Hold Position
-    CMD('Build [Hold Position]', perItem, function()
+    CMD(holdTitle, perItem, function()
       self:BuildSpecificAtGroup(group, it.key, { behavior = 'defend' })
     end)
     -- Attack variant (render even if canAttackMove=false; we message accordingly)
     local vr = (self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000
-    CMD(string.format('Build [Attack (%dm)]', vr), perItem, function()
+    CMD(attackTitle, perItem, function()
       if it.def and it.def.canAttackMove == false then
         MESSAGE:New('This unit is static or not suited to move; it will hold position.', 8):ToGroup(group)
         self:BuildSpecificAtGroup(group, it.key, { behavior = 'defend' })
@@ -6499,11 +6552,14 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
   local now = timer.getTime()
   local gname = group:GetName()
   if self.Config.BuildCooldownEnabled then
-    local last = CTLD._buildCooldown[gname]
-    if last and (now - last) < (self.Config.BuildCooldownSeconds or 60) then
-      local rem = math.max(0, math.ceil((self.Config.BuildCooldownSeconds or 60) - (now - last)))
-      _msgGroup(group, string.format('Build on cooldown. Try again in %ds.', rem))
-      return
+    local cd = tonumber(self.Config.BuildCooldownSeconds) or 0
+    if cd > 0 then
+      local last = CTLD._buildCooldown[gname]
+      if last and (now - last) < cd then
+        local rem = math.max(0, math.ceil(cd - (now - last)))
+        _msgGroup(group, string.format('Build on cooldown. Try again in %ds.', rem))
+        return
+      end
     end
   end
   if self.Config.BuildConfirmEnabled then
@@ -6721,84 +6777,142 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
     return
   end
 
-  -- Verify counts and build
+  -- Verify counts and build (supports multi-build when cooldown is zero)
   if type(def.requires) == 'table' then
-    for reqKey,qty in pairs(def.requires) do if (counts[reqKey] or 0) < (qty or 0) then _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey }); return end end
-  local gdata = def.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, def.side or self.Side)
-    _eventSend(self, group, nil, 'build_started', { build = def.description or recipeKey })
-    local g = _coalitionAddGroup(def.side or self.Side, def.category or Group.Category.GROUND, gdata, self.Config)
-    if not g then _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' }); return end
-    if self.Config.JTAC and self.Config.JTAC.Verbose then
-      _logInfo(string.format('JTAC pre: post-build (composite) key=%s group=%s', tostring(recipeKey), tostring(g:getName())))
-    end
-  self:_maybeRegisterJTAC(recipeKey, def, g)
-    for reqKey,qty in pairs(def.requires) do consumeCrates(reqKey, qty or 0) end
-    _eventSend(self, nil, self.Side, 'build_success_coalition', { build = def.description or recipeKey, player = _playerNameFromGroup(group) })
-    if def.isFOB then pcall(function() self:_CreateFOBPickupZone({ x = spawnAt.x, z = spawnAt.z }, def, hdg) end) end
-    if def.isMobileMASH then
-      _logDebug(string.format('[MobileMASH] BuildSpecificAtGroup invoking _CreateMobileMASH for key %s at (%.1f, %.1f)', tostring(recipeKey), spawnAt.x or -1, spawnAt.z or -1))
-      local ok, err = pcall(function() self:_CreateMobileMASH(g, { x = spawnAt.x, z = spawnAt.z }, def) end)
-      if not ok then
-        _logError(string.format('[MobileMASH] _CreateMobileMASH invocation failed: %s', tostring(err)))
+    local cd = tonumber(self.Config.BuildCooldownSeconds) or 0
+    local maxCopies = 1
+    if cd <= 0 then
+      maxCopies = math.huge
+      for reqKey,qty in pairs(def.requires) do
+        if (qty or 0) > 0 then
+          local available = counts[reqKey] or 0
+          local copiesForKey = math.floor(available / (qty or 1))
+          if copiesForKey < maxCopies then maxCopies = copiesForKey end
+        end
       end
-    end
-    -- behavior
-    local behavior = opts and opts.behavior or nil
-    if behavior == 'attack' and (def.canAttackMove ~= false) and self.Config.AttackAI and self.Config.AttackAI.Enabled then
-      local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
-      local isMetric = _getPlayerIsMetric(group:GetUnit(1))
-      if t and t.kind == 'base' then
-        local brg = _bearingDeg(spawnAt, t.point)
-        local v, u = _fmtRange(t.dist or 0, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
-      elseif t and t.kind == 'enemy' then
-        local brg = _bearingDeg(spawnAt, t.point)
-        local v, u = _fmtRange(t.dist or 0, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
-      else
-        local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+      if maxCopies < 1 or maxCopies == math.huge then
+        _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey })
+        return
       end
-    elseif behavior == 'attack' and def.canAttackMove == false then
-      MESSAGE:New('This unit is static or not suited to move; it will hold position.', 8):ToGroup(group)
+    else
+      for reqKey,qty in pairs(def.requires) do
+        if (counts[reqKey] or 0) < (qty or 0) then
+          _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey })
+          return
+        end
+      end
+      maxCopies = 1
     end
-    if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
+
+    local built = 0
+    while built < maxCopies do
+	  local gdata = def.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, def.side or self.Side)
+      _eventSend(self, group, nil, 'build_started', { build = def.description or recipeKey })
+      local g = _coalitionAddGroup(def.side or self.Side, def.category or Group.Category.GROUND, gdata, self.Config)
+      if not g then
+        _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' })
+        break
+      end
+      if self.Config.JTAC and self.Config.JTAC.Verbose then
+        _logInfo(string.format('JTAC pre: post-build (composite) key=%s group=%s', tostring(recipeKey), tostring(g:getName())))
+      end
+	  self:_maybeRegisterJTAC(recipeKey, def, g)
+      for reqKey,qty in pairs(def.requires) do
+        consumeCrates(reqKey, qty or 0)
+        counts[reqKey] = (counts[reqKey] or 0) - (qty or 0)
+      end
+      _eventSend(self, nil, self.Side, 'build_success_coalition', { build = def.description or recipeKey, player = _playerNameFromGroup(group) })
+      if def.isFOB then pcall(function() self:_CreateFOBPickupZone({ x = spawnAt.x, z = spawnAt.z }, def, hdg) end) end
+      if def.isMobileMASH then
+        _logDebug(string.format('[MobileMASH] BuildSpecificAtGroup invoking _CreateMobileMASH for key %s at (%.1f, %.1f)', tostring(recipeKey), spawnAt.x or -1, spawnAt.z or -1))
+        local ok, err = pcall(function() self:_CreateMobileMASH(g, { x = spawnAt.x, z = spawnAt.z }, def) end)
+        if not ok then
+          _logError(string.format('[MobileMASH] _CreateMobileMASH invocation failed: %s', tostring(err)))
+        end
+      end
+      -- behavior (applied for each built group)
+      local behavior = opts and opts.behavior or nil
+      if behavior == 'attack' and (def.canAttackMove ~= false) and self.Config.AttackAI and self.Config.AttackAI.Enabled then
+        local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
+        local isMetric = _getPlayerIsMetric(group:GetUnit(1))
+        if t and t.kind == 'base' then
+          local brg = _bearingDeg(spawnAt, t.point)
+          local v, u = _fmtRange(t.dist or 0, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
+        elseif t and t.kind == 'enemy' then
+          local brg = _bearingDeg(spawnAt, t.point)
+          local v, u = _fmtRange(t.dist or 0, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
+        else
+          local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+        end
+      elseif behavior == 'attack' and def.canAttackMove == false then
+        MESSAGE:New('This unit is static or not suited to move; it will hold position.', 8):ToGroup(group)
+      end
+
+      built = built + 1
+      if cd > 0 then break end
+    end
+
+    if self.Config.BuildCooldownEnabled and cd > 0 then CTLD._buildCooldown[gname] = now end
     return
   else
     -- single-key
     local need = def.required or 1
-    if (counts[recipeKey] or 0) < need then _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey }); return end
-  local gdata = def.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, def.side or self.Side)
-    _eventSend(self, group, nil, 'build_started', { build = def.description or recipeKey })
-    local g = _coalitionAddGroup(def.side or self.Side, def.category or Group.Category.GROUND, gdata, self.Config)
-    if not g then _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' }); return end
-    if self.Config.JTAC and self.Config.JTAC.Verbose then
-      _logInfo(string.format('JTAC pre: post-build (single) key=%s group=%s', tostring(recipeKey), tostring(g:getName())))
-    end
-  self:_maybeRegisterJTAC(recipeKey, def, g)
-    consumeCrates(recipeKey, need)
-    _eventSend(self, nil, self.Side, 'build_success_coalition', { build = def.description or recipeKey, player = _playerNameFromGroup(group) })
-    -- behavior
-    local behavior = opts and opts.behavior or nil
-    if behavior == 'attack' and (def.canAttackMove ~= false) and self.Config.AttackAI and self.Config.AttackAI.Enabled then
-      local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
-      local isMetric = _getPlayerIsMetric(group:GetUnit(1))
-      if t and t.kind == 'base' then
-        local brg = _bearingDeg(spawnAt, t.point)
-        local v, u = _fmtRange(t.dist or 0, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
-      elseif t and t.kind == 'enemy' then
-        local brg = _bearingDeg(spawnAt, t.point)
-        local v, u = _fmtRange(t.dist or 0, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
-      else
-        local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
-        _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+    local cd = tonumber(self.Config.BuildCooldownSeconds) or 0
+    local maxCopies = 1
+    if cd <= 0 then
+      local available = counts[recipeKey] or 0
+      maxCopies = math.floor(available / need)
+      if maxCopies < 1 then
+        _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey })
+        return
       end
-    elseif behavior == 'attack' and def.canAttackMove == false then
-      MESSAGE:New('This unit is static or not suited to move; it will hold position.', 8):ToGroup(group)
+    else
+      if (counts[recipeKey] or 0) < need then _eventSend(self, group, nil, 'build_insufficient_crates', { build = def.description or recipeKey }); return end
+      maxCopies = 1
     end
-    if self.Config.BuildCooldownEnabled then CTLD._buildCooldown[gname] = now end
+
+    local built = 0
+    while built < maxCopies do
+	  local gdata = def.build({ x = spawnAt.x, z = spawnAt.z }, hdgDeg, def.side or self.Side)
+      _eventSend(self, group, nil, 'build_started', { build = def.description or recipeKey })
+      local g = _coalitionAddGroup(def.side or self.Side, def.category or Group.Category.GROUND, gdata, self.Config)
+      if not g then _eventSend(self, group, nil, 'build_failed', { reason = 'DCS group spawn error' }); break end
+      if self.Config.JTAC and self.Config.JTAC.Verbose then
+        _logInfo(string.format('JTAC pre: post-build (single) key=%s group=%s', tostring(recipeKey), tostring(g:getName())))
+      end
+	  self:_maybeRegisterJTAC(recipeKey, def, g)
+      consumeCrates(recipeKey, need)
+      counts[recipeKey] = (counts[recipeKey] or 0) - need
+      _eventSend(self, nil, self.Side, 'build_success_coalition', { build = def.description or recipeKey, player = _playerNameFromGroup(group) })
+      -- behavior
+      local behavior = opts and opts.behavior or nil
+      if behavior == 'attack' and (def.canAttackMove ~= false) and self.Config.AttackAI and self.Config.AttackAI.Enabled then
+        local t = self:_assignAttackBehavior(g:getName(), spawnAt, true)
+        local isMetric = _getPlayerIsMetric(group:GetUnit(1))
+        if t and t.kind == 'base' then
+          local brg = _bearingDeg(spawnAt, t.point)
+          local v, u = _fmtRange(t.dist or 0, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_base_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), base_name = t.name, brg = brg, rng = v, rng_u = u })
+        elseif t and t.kind == 'enemy' then
+          local brg = _bearingDeg(spawnAt, t.point)
+          local v, u = _fmtRange(t.dist or 0, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_enemy_announce', { unit_name = g:getName(), player = _playerNameFromGroup(group), enemy_type = t.etype or 'unit', brg = brg, rng = v, rng_u = u })
+        else
+          local v, u = _fmtRange((self.Config.AttackAI and self.Config.AttackAI.VehicleSearchRadius) or 5000, isMetric)
+          _eventSend(self, nil, self.Side, 'attack_no_targets', { unit_name = g:getName(), player = _playerNameFromGroup(group), rng = v, rng_u = u })
+        end
+      elseif behavior == 'attack' and def.canAttackMove == false then
+        MESSAGE:New('This unit is static or not suited to move; it will hold position.', 8):ToGroup(group)
+      end
+
+      built = built + 1
+      if cd > 0 then break end
+    end
+
+    if self.Config.BuildCooldownEnabled and cd > 0 then CTLD._buildCooldown[gname] = now end
     return
   end
 end
@@ -10099,6 +10213,30 @@ function CTLD:InitMEDEVAC()
           end
         end
       end
+      
+      -- Next check if this death wiped out an active MEDEVAC crew group
+      -- Be defensive: unit may be a Moose wrapper or raw DCS unit, and
+      -- not all objects will expose a "GetGroup" method.
+      local dcsGroup = (unit and unit.GetGroup and unit:GetGroup()) or (unit and unit.getGroup and unit:getGroup()) or nil
+      if dcsGroup then
+        local gName = dcsGroup:GetName()
+        if gName and CTLD._medevacCrews[gName] then
+          local anyAlive = false
+          local units = dcsGroup:GetUnits()
+          if units then
+            for _, u in ipairs(units) do
+              if u and u:IsAlive() then
+                anyAlive = true
+                break
+              end
+            end
+          end
+          if not anyAlive then
+            selfref:_RemoveMEDEVACCrew(gName, 'killed')
+            return
+          end
+        end
+      end
     end
     
     -- Normal death processing for vehicle spawning MEDEVAC crews
@@ -10571,19 +10709,9 @@ function CTLD:_SpawnMEDEVACCrew(eventData, catalogEntry)
       -- Crew survived! Now announce to players and make mission available
       _logVerbose(string.format('[MEDEVAC] Crew %s survived, announcing mission', crewGroupName))
       
-      -- Make crew visible again (remove invisibility) and optionally remove immortality
+      -- Optionally remove immortality after announcement; visibility is controlled by KeepCrewInvisibleForLifetime
       local crewController = g:getController()
       if crewController then
-        -- Always make crew visible when they announce
-        if cfg.CrewInvisibleDuringDelay then
-          local setVisible = {
-            id = 'SetInvisible',
-            params = { value = false }
-          }
-          Controller.setCommand(crewController, setVisible)
-          _logVerbose('[MEDEVAC] Crew is now visible to AI')
-        end
-        
         -- Remove immortality unless config says to keep it
         if cfg.CrewImmortalDuringDelay and not cfg.CrewImmortalAfterAnnounce then
           local setMortal = {
@@ -10819,6 +10947,21 @@ function CTLD:_RemoveMEDEVACCrew(crewGroupName, reason)
       CTLD._medevacStats[self.Side].timedOut = (CTLD._medevacStats[self.Side].timedOut or 0) + 1
     end
   elseif reason == 'killed' then
+    local grid = self:_GetMGRSString(data.position)
+    local lines = CTLD.Messages.medevac_crew_killed_lines
+    if lines and #lines > 0 then
+      local line = lines[math.random(1, #lines)]
+      _msgCoalition(self.Side, _fmtTemplate(line, {
+        vehicle = data.vehicleType,
+        grid = grid,
+      }), 15)
+    else
+      _msgCoalition(self.Side, _fmtTemplate(CTLD.Messages.medevac_crew_killed, {
+        vehicle = data.vehicleType,
+        grid = grid,
+      }), 15)
+    end
+    
     -- Track statistics
     if CTLD.MEDEVAC and CTLD.MEDEVAC.Statistics and CTLD.MEDEVAC.Statistics.Enabled then
       CTLD._medevacStats[self.Side].killed = (CTLD._medevacStats[self.Side].killed or 0) + 1
