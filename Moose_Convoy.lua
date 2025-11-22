@@ -33,6 +33,13 @@ LOGGING_ENABLED = true           -- Enable/disable detailed logging
 LOGGING_LEVEL = "DEBUG"          -- "DEBUG", "INFO", "WARNING", "ERROR" (Set to DEBUG to troubleshoot zone issues)
 STARTUP_TEST_REPORT = true       -- Report validation results to players on startup
 
+-- Message Durations (seconds)
+MESSAGE_DURATION_DEFAULT = 15    -- Standard message duration
+MESSAGE_DURATION_SHORT = 10      -- Brief informational pings
+MESSAGE_DURATION_LONG = 30       -- Extended announcements (e.g., validation reports)
+MESSAGE_MGRS_PRECISION = 5       -- Digits for MGRS strings (1-5)
+RESUME_MESSAGE_COOLDOWN = 120    -- Minimum seconds between identical "resume movement" notifications
+
 -- Convoy Template Names (must exist as late-activated groups in mission)
 CONVOY_TEMPLATE_NAMES = {
     "Convoy Template 1",  -- Add your template group names here
@@ -54,12 +61,12 @@ PLAYER_CONTROLLED_DESTINATIONS = false  -- If true, players mark destinations; i
 STATIC_DESTINATIONS = {
     -- Examples:
     -- { name = "Main Base", lat = 42.1234, lon = 43.5678 },
-    { name = "Convoy Destination", zone = "Convoy Destination" },
+    { name = "convoy end", zone = "convoy end" },
 }
 
 -- Mark Keywords (case-insensitive, detects if keyword is in mark text)
-CONVOY_SPAWN_KEYWORD = "convoy"           -- Mark near pickup/FOB zone to spawn convoy
-CONVOY_DEST_KEYWORD = "convoy destination" -- Mark to set convoy destination (if player-controlled)
+CONVOY_SPAWN_KEYWORD = "convoy start"           -- Mark near pickup/FOB zone to spawn convoy
+CONVOY_DEST_KEYWORD = "convoy end" -- Mark to set convoy destination (if player-controlled)
 
 -- Speed Settings (in km/h)
 CONVOY_SPEED_ROAD = 60        -- Speed when traveling on roads
@@ -79,12 +86,19 @@ THREAT_CLEARED_RANGE = 11000        -- Give a little buffer before calling area 
 ROUTE_CHECK_INTERVAL = 3            -- Seconds between route integrity scans
 ROUTE_DEVIATION_THRESHOLD = 750     -- Meters away from mission destination before re-routing
 ROUTE_REISSUE_MIN_INTERVAL = 6      -- Seconds between automatic route reapplications
+ROUTE_TASK_GRACE_PERIOD = 2         -- Seconds to wait after issuing a route before integrity checks run
+ROUTE_WARNING_COOLDOWN = 6          -- Minimum seconds between route-missing warnings
+ROUTE_RESUME_GRACE_PERIOD = 8       -- Seconds to wait after clearing a hold before route restores fire again
+
+-- Threat Hold Behaviour
+CONVOY_HARD_LOCK_ON_THREAT = true   -- true = players cannot override movement while in CONTACT; false = allow override but still warn
 
 -- Smoke Settings
 FRIENDLY_SMOKE_COLOR = SMOKECOLOR.Green  -- Smoke color for convoy position
 ENEMY_SMOKE_COLOR = SMOKECOLOR.Red       -- Smoke color for enemy position
 SMOKE_ON_CONTACT = true                  -- Pop smoke when contact is made
 SMOKE_ON_CLEAR = false                    -- Pop smoke when threats cleared
+SMOKE_MIN_INTERVAL = 60                   -- Minimum seconds between smoke pops per convoy
 
 -- Radio Settings
 CONVOY_RADIO_FREQUENCY = 256.0      -- Radio frequency for convoy comms (MHz)
@@ -110,6 +124,11 @@ MOOSE_CONVOY = {
     PickupZones = {},        -- Cached CTLD pickup zones (both coalitions)
     FOBZones = {},           -- Cached CTLD FOB zones (both coalitions)
     ValidationResults = {},  -- Stores startup validation results
+    MenuRoots = {},          -- F10 coalition menu roots
+    IntelMarks = {},         -- Active intel marks per coalition
+    IntelMarkLookup = {},    -- Fast lookup for intel mark IDs
+    MarkIdCounter = 0,       -- Sequential mark IDs for intel marks
+    LastSmokeTime = {},      -- Per-convoy last smoke timestamp
 }
 
 -------------------------------------------------------------------
@@ -158,25 +177,426 @@ function MOOSE_CONVOY:GetUnitName(unit)
     return nil
 end
 
---- Build a MOOSE coordinate from either a UNIT or raw vec3 provider
--- @param entity The unit or object with position information
--- @return #COORDINATE|nil Coordinate when resolved successfully
-function MOOSE_CONVOY:GetUnitCoordinate(entity)
-    if not entity then return nil end
-    if entity.IsAlive and not entity:IsAlive() then
+local function _convoyFormatDMS(lat, lon)
+    local function toDMS(value, isLat)
+        if type(value) ~= "number" then
+            return nil
+        end
+        local hemisphere = isLat and (value >= 0 and "N" or "S") or (value >= 0 and "E" or "W")
+        value = math.abs(value)
+        local degrees = math.floor(value)
+        local minutesFloat = (value - degrees) * 60
+        local minutes = math.floor(minutesFloat)
+        local seconds = (minutesFloat - minutes) * 60
+        local formatPattern = isLat and "%s%02d°%02d'%05.2f\"" or "%s%03d°%02d'%05.2f\""
+        return string.format(formatPattern, hemisphere, degrees, minutes, seconds)
+    end
+
+    local latText = toDMS(lat, true)
+    local lonText = toDMS(lon, false)
+
+    if not latText or not lonText then
         return nil
     end
-    if entity.GetCoordinate then
-        local ok, coord = pcall(function() return entity:GetCoordinate() end)
-        if ok and coord then return coord end
+
+    return string.format("%s %s", latText, lonText)
+end
+
+local function _convoyFormatMGRS(lat, lon, precision)
+    if type(lat) ~= "number" or type(lon) ~= "number" then
+        return nil
     end
-    if entity.getPoint then
-        local ok, vec3 = pcall(function() return entity:getPoint() end)
-        if ok and vec3 then
-            return COORDINATE:NewFromVec3(vec3)
+
+    local mgrsTable = coord and coord.LLtoMGRS and coord.LLtoMGRS(lat, lon)
+    if not mgrsTable or not mgrsTable.UTMZone or not mgrsTable.MGRSDigraph or not mgrsTable.Easting or not mgrsTable.Northing then
+        return nil
+    end
+
+    local digits = tonumber(precision) or 5
+    if digits < 1 then digits = 1 elseif digits > 5 then digits = 5 end
+
+    local rawEast = math.floor(mgrsTable.Easting + 0.5)
+    local rawNorth = math.floor(mgrsTable.Northing + 0.5)
+    local divisor = 10 ^ (5 - digits)
+    local east = math.floor(rawEast / divisor)
+    local north = math.floor(rawNorth / divisor)
+    local formatPattern = string.format("%%0%dd", digits)
+
+    return string.format("%s%s %s %s",
+        tostring(mgrsTable.UTMZone),
+        tostring(mgrsTable.MGRSDigraph),
+        string.format(formatPattern, east),
+        string.format(formatPattern, north)
+    )
+end
+
+function MOOSE_CONVOY:GetVec3FromCoordinate(source)
+    if not source then
+        return nil
+    end
+
+    -- Direct MOOSE coordinate support
+    if type(source) == "table" then
+        if source.GetVec3 then
+            local ok, vec3 = pcall(function()
+                return source:GetVec3()
+            end)
+            if ok and vec3 and vec3.x and vec3.z then
+                vec3.y = vec3.y or 0
+                return vec3
+            end
+        end
+
+        if source.GetVec2 then
+            local ok, vec2 = pcall(function()
+                return source:GetVec2()
+            end)
+            if ok and vec2 and vec2.x and vec2.y then
+                local height = land and land.getHeight and land.getHeight({ x = vec2.x, y = vec2.y }) or 0
+                return { x = vec2.x, y = height, z = vec2.y }
+            end
         end
     end
+
+    -- Raw vec3 table { x, y, z }
+    if type(source) == "table" and source.x and source.z then
+        local vec3 = {
+            x = source.x,
+            z = source.z,
+            y = source.y or source.alt or 0
+        }
+        if not vec3.y and land and land.getHeight then
+            local ok, height = pcall(land.getHeight, { x = vec3.x, y = vec3.z })
+            if ok and height then
+                vec3.y = height
+            end
+        end
+        return vec3
+    end
+
+    -- Vec2 table { x, y }
+    if type(source) == "table" and source.x and source.y and not source.z then
+        local height = land and land.getHeight and land.getHeight({ x = source.x, y = source.y }) or 0
+        return { x = source.x, y = height, z = source.y }
+    end
+
     return nil
+end
+
+--- Format a coordinate for player-facing messages (LL + MGRS when available)
+-- @param coord #COORDINATE Coordinate to format
+-- @return #string Coordinate string for chat/radio output
+function MOOSE_CONVOY:GetCoordinateComponents(source)
+    if not source then
+        return nil, nil
+    end
+
+    local vec3 = self:GetVec3FromCoordinate(source)
+    if not vec3 then
+        return nil, nil
+    end
+
+    local lat, lon
+    if coord and coord.LOtoLL then
+        local ok, latResult, lonResult = pcall(function()
+            return coord.LOtoLL(vec3)
+        end)
+        if ok then
+            lat, lon = latResult, lonResult
+        end
+    end
+
+    if not lat or not lon then
+        return nil, nil
+    end
+
+    local ll = _convoyFormatDMS(lat, lon)
+    local mgrs = _convoyFormatMGRS(lat, lon, MESSAGE_MGRS_PRECISION)
+
+    if mgrs and mgrs ~= "" then
+        mgrs = "MGRS " .. mgrs
+    else
+        mgrs = nil
+    end
+
+    return ll, mgrs
+end
+
+function MOOSE_CONVOY:FormatCoordinateForMessage(coord)
+    local ll, mgrs = self:GetCoordinateComponents(coord)
+
+    if ll and mgrs then
+        return string.format("%s | %s", ll, mgrs)
+    end
+    if ll then
+        return ll
+    end
+    if mgrs then
+        return mgrs
+    end
+
+    return "UNKNOWN"
+end
+
+--- Return a short coalition name for messages
+-- @param coalitionID #number Coalition side ID
+-- @return #string Human-readable coalition name
+function MOOSE_CONVOY:GetCoalitionName(coalitionID)
+    if coalitionID == coalition.side.BLUE then
+        return "Blue"
+    elseif coalitionID == coalition.side.RED then
+        return "Red"
+    end
+    return "Coalition"
+end
+
+--- Return an MGRS label suitable for map mark text
+-- @param coord #COORDINATE
+-- @return #string Short MGRS string or "UNK"
+function MOOSE_CONVOY:GetCoordinateMGRSLabel(coord)
+    local _, mgrs = self:GetCoordinateComponents(coord)
+    if not mgrs or mgrs == "" then
+        return "UNK"
+    end
+    return mgrs:gsub("^MGRS%s+", "")
+end
+
+--- Generate the next mark ID for intel marks
+-- @return #number markId
+function MOOSE_CONVOY:NextMarkId()
+    self.MarkIdCounter = (self.MarkIdCounter or 0) + 1
+    return 600000 + self.MarkIdCounter
+end
+
+--- Remove intel marks for a coalition (if any)
+-- @param coalitionID #number Coalition side ID
+function MOOSE_CONVOY:RemoveIntelMarks(coalitionID)
+    if not self.IntelMarks or not self.IntelMarks[coalitionID] then
+        return
+    end
+    local marks = self.IntelMarks[coalitionID]
+    self.IntelMarks[coalitionID] = nil
+    for _, markId in ipairs(marks) do
+        trigger.action.removeMark(markId)
+        if self.IntelMarkLookup then
+            self.IntelMarkLookup[markId] = nil
+        end
+    end
+end
+
+--- Remove intel marks associated with a specific convoy (by name prefix)
+-- @param convoy #table Convoy object
+function MOOSE_CONVOY:ClearIntelForConvoy(convoy)
+    if not convoy or not convoy.Name or not self.IntelMarks then
+        return
+    end
+    local nameLower = string.lower(convoy.Name)
+    for coalitionID, marks in pairs(self.IntelMarks) do
+        if marks then
+            for idx = #marks, 1, -1 do
+                local markId = marks[idx]
+                local owner = self.IntelMarkLookup and self.IntelMarkLookup[markId]
+                if owner == coalitionID then
+                    local markInfo = trigger.misc.getMarkID and trigger.misc.getMarkID(markId)
+                    local text = markInfo and markInfo.text or ""
+                    if text ~= "" and string.find(string.lower(text), nameLower, 1, true) then
+                        trigger.action.removeMark(markId)
+                        self.IntelMarkLookup[markId] = nil
+                        table.remove(marks, idx)
+                    end
+                end
+            end
+            if #marks == 0 then
+                self.IntelMarks[coalitionID] = nil
+            end
+        end
+    end
+end
+
+--- Determine whether a mark ID belongs to convoy intel
+-- @param markId #number
+-- @return #boolean
+function MOOSE_CONVOY:IsIntelMark(markId)
+    if not markId then
+        return false
+    end
+    return self.IntelMarkLookup and self.IntelMarkLookup[markId] ~= nil
+end
+
+--- Cleanup bookkeeping for an intel mark that has been removed externally
+-- @param markId #number
+function MOOSE_CONVOY:HandleIntelMarkRemoval(markId)
+    if not markId then
+        return
+    end
+    if self.IntelMarkLookup then
+        self.IntelMarkLookup[markId] = nil
+    end
+    if not self.IntelMarks then
+        return
+    end
+    for coalitionID, marks in pairs(self.IntelMarks) do
+        if marks then
+            for idx = #marks, 1, -1 do
+                if marks[idx] == markId then
+                    table.remove(marks, idx)
+                end
+            end
+            if #marks == 0 then
+                self.IntelMarks[coalitionID] = nil
+            end
+        end
+    end
+end
+
+--- Gather active convoys for a coalition
+-- @param coalitionID #number Coalition side ID
+-- @return #table List of convoy objects
+function MOOSE_CONVOY:GetActiveConvoysForCoalition(coalitionID)
+    local results = {}
+    for _, convoy in pairs(self.Convoys or {}) do
+        if convoy and convoy.Coalition == coalitionID and self:IsConvoyActive(convoy) then
+            table.insert(results, convoy)
+        end
+    end
+    table.sort(results, function(a, b)
+        return (a.ID or 0) < (b.ID or 0)
+    end)
+    return results
+end
+
+--- Create F10 menus for each coalition to request convoy intel
+function MOOSE_CONVOY:SetupCoalitionMenus()
+    if self.MenusInitialized then
+        return
+    end
+
+    local coalitionsToSetup = { coalition.side.BLUE, coalition.side.RED }
+    for _, coalID in ipairs(coalitionsToSetup) do
+        local rootMenu = MENU_COALITION:New(coalID, "Convoy Intel")
+        if rootMenu then
+            self.MenuRoots[coalID] = rootMenu
+            MENU_COALITION_COMMAND:New(coalID, "Request Convoy Intel", rootMenu, function()
+                self:BroadcastConvoyIntel(coalID)
+            end)
+            MENU_COALITION_COMMAND:New(coalID, "Drop Intel Map Marks", rootMenu, function()
+                self:CreateIntelMarks(coalID)
+            end)
+            self:Log("INFO", string.format("Coalition menu created for %s", self:GetCoalitionName(coalID)))
+        else
+            self:Log("WARNING", string.format("Failed to create menu for coalition %s", tostring(coalID)))
+        end
+    end
+
+    self.MenusInitialized = true
+end
+
+--- Send an intel report to a coalition
+-- @param coalitionID #number Coalition side ID
+function MOOSE_CONVOY:BroadcastConvoyIntel(coalitionID)
+    local convoys = self:GetActiveConvoysForCoalition(coalitionID)
+    local coalitionName = self:GetCoalitionName(coalitionID)
+
+    if #convoys == 0 then
+        MESSAGE:New(string.format("%s coalition: No active convoys at this time.", coalitionName), MESSAGE_DURATION_SHORT):ToCoalition(coalitionID)
+        return
+    end
+
+    local lines = {}
+    lines[#lines + 1] = string.format("%s Coalition Convoy Intel (%d active)", coalitionName, #convoys)
+
+    local function appendCoordinateBlock(targetLines, label, coord)
+        targetLines[#targetLines + 1] = string.format("  %s:", label)
+        local ll, mgrs = self:GetCoordinateComponents(coord)
+        targetLines[#targetLines + 1] = string.format("    -- %s", ll or "LL UNKNOWN")
+        targetLines[#targetLines + 1] = string.format("    -- %s", mgrs or "MGRS UNKNOWN")
+    end
+
+    for _, convoy in ipairs(convoys) do
+        local groupCoord = convoy.Group and convoy.Group:GetCoordinate()
+        local status = convoy.Status or "UNKNOWN"
+
+        lines[#lines + 1] = string.format("%s [%s]", convoy.Name, status)
+        appendCoordinateBlock(lines, "Position", groupCoord)
+
+        if convoy.DestPoint then
+            appendCoordinateBlock(lines, "Destination", convoy.DestPoint)
+        end
+
+        if groupCoord and convoy.DestPoint then
+            local remaining = groupCoord:Get2DDistance(convoy.DestPoint)
+            if remaining then
+                lines[#lines + 1] = string.format("  Distance Remaining: %.1f km", remaining / 1000)
+            end
+        end
+
+        if convoy.InContact then
+            local reasonText = (convoy.ContactReason == "UNDER_FIRE") and "Taking fire" or "Enemy spotted"
+            appendCoordinateBlock(lines, string.format("Enemy Contact (%s)", reasonText), convoy.EnemyPosition)
+        end
+
+        lines[#lines + 1] = ""
+    end
+
+    local messageText = table.concat(lines, "\n")
+    MESSAGE:New(messageText, MESSAGE_DURATION_LONG):ToCoalition(coalitionID)
+end
+--- Create map marks for convoys needing assistance
+-- @param coalitionID #number Coalition side ID
+function MOOSE_CONVOY:CreateIntelMarks(coalitionID)
+    self:RemoveIntelMarks(coalitionID)
+
+    local convoys = self:GetActiveConvoysForCoalition(coalitionID)
+    local coalitionName = self:GetCoalitionName(coalitionID)
+
+    local marksCreated = {}
+
+    for _, convoy in ipairs(convoys) do
+        if convoy.InContact then
+            local convoyCoord = convoy.Group and convoy.Group:GetCoordinate()
+            if convoyCoord then
+                local convoyMarkId = self:NextMarkId()
+                self.IntelMarkLookup = self.IntelMarkLookup or {}
+                self.IntelMarkLookup[convoyMarkId] = coalitionID
+                local convoyMgrs = self:GetCoordinateMGRSLabel(convoyCoord)
+                local convoyVec3 = convoyCoord:GetVec3()
+                if convoyVec3 and convoyVec3.x ~= nil and convoyVec3.y ~= nil and convoyVec3.z ~= nil then
+                    trigger.action.markToCoalition(convoyMarkId, string.format("%s HOLD %s", convoy.Name, convoyMgrs), convoyVec3, coalitionID)
+                    table.insert(marksCreated, convoyMarkId)
+                else
+                    self:Log("WARNING", string.format("Unable to place convoy intel mark for %s - invalid coordinate vector", convoy.Name))
+                    if self.IntelMarkLookup then
+                        self.IntelMarkLookup[convoyMarkId] = nil
+                    end
+                end
+            end
+
+            if convoy.EnemyPosition then
+                local enemyMarkId = self:NextMarkId()
+                self.IntelMarkLookup = self.IntelMarkLookup or {}
+                self.IntelMarkLookup[enemyMarkId] = coalitionID
+                local enemyMgrs = self:GetCoordinateMGRSLabel(convoy.EnemyPosition)
+                local enemyVec3 = convoy.EnemyPosition:GetVec3()
+                if enemyVec3 and enemyVec3.x ~= nil and enemyVec3.y ~= nil and enemyVec3.z ~= nil then
+                    trigger.action.markToCoalition(enemyMarkId, string.format("%s ENEMY %s", convoy.Name, enemyMgrs), enemyVec3, coalitionID)
+                    table.insert(marksCreated, enemyMarkId)
+                else
+                    self:Log("WARNING", string.format("Unable to place enemy intel mark for %s - invalid coordinate vector", convoy.Name))
+                    if self.IntelMarkLookup then
+                        self.IntelMarkLookup[enemyMarkId] = nil
+                    end
+                end
+            end
+        end
+    end
+
+    if #marksCreated == 0 then
+        MESSAGE:New(string.format("%s coalition: No convoys currently requesting assistance. Existing intel marks cleared.", coalitionName), MESSAGE_DURATION_SHORT):ToCoalition(coalitionID)
+        return
+    end
+
+    self.IntelMarks[coalitionID] = marksCreated
+    MESSAGE:New(string.format("%s coalition: Intel marks placed for convoys requesting assistance.", coalitionName), MESSAGE_DURATION_DEFAULT):ToCoalition(coalitionID)
 end
 
 --- Get CTLD zones for convoy spawning from both coalition instances
@@ -372,20 +792,24 @@ function MOOSE_CONVOY:ApplyRouteToDestination(reason, force, bypassThrottle)
         return false
     end
 
+    -- In hard-lock mode, we never reapply a movement route while in
+    -- contact, except explicitly from the "threats cleared" path.
     if self.InContact and not force then
+        if CONVOY_HARD_LOCK_ON_THREAT then
+            self.RouteNeedsRefresh = true
+            return false
+        end
         self.RouteNeedsRefresh = true
         return false
     end
 
     local now = timer.getTime()
-    if not bypassThrottle then
-        local last = self.LastRouteReissue or 0
-        if last > 0 and (now - last) < ROUTE_REISSUE_MIN_INTERVAL then
-            return false
-        end
+    if not bypassThrottle and (self.LastRouteReissue or 0) > 0 and (now - self.LastRouteReissue) < ROUTE_REISSUE_MIN_INTERVAL then
+        return false
     end
 
     self.LastRouteReissue = now
+    self.LastRouteCommandTime = now
     self.RouteNeedsRefresh = false
     if self.DestPoint.GetVec2 then
         self.ExpectedRouteEndpoint = self.DestPoint:GetVec2()
@@ -393,54 +817,167 @@ function MOOSE_CONVOY:ApplyRouteToDestination(reason, force, bypassThrottle)
         self.ExpectedRouteEndpoint = nil
     end
     self.Group:RouteGroundOnRoad(self.DestPoint, CONVOY_SPEED_ROAD)
+    self:EnsureOnRoadFormation()
     self:Log("INFO", string.format("%s route command issued (%s)", self.Name, reason or "ROUTE"))
     return true
 end
 
---- Retrieve the current DCS route endpoint for comparison
--- @return #table|nil Vec2 of last waypoint or nil if unavailable
-function MOOSE_CONVOY:GetRouteEndpointVec2()
-    if not self.Group then return nil end
+--- Ensure the convoy stays in an on-road formation to prevent lateral drift
+function MOOSE_CONVOY:EnsureOnRoadFormation()
+    if not self.Group or not self.Group:IsAlive() then
+        return
+    end
+
+    local groundOptions = AI and AI.Option and AI.Option.Ground
+    if not groundOptions then
+        return
+    end
+
+    local formationId = groundOptions.id and (groundOptions.id.FORMATION or groundOptions.id.formation)
+    if not formationId then
+        return
+    end
+
+    local formationTable = groundOptions.formation or (groundOptions.val and groundOptions.val.FORMATION)
+    if not formationTable then
+        return
+    end
+
+    local chosenFormation = formationTable.ON_ROAD or formationTable.COLUMN
+    if not chosenFormation then
+        return
+    end
+
+    local formationLabel
+    if formationTable.ON_ROAD == chosenFormation then
+        formationLabel = "ON_ROAD"
+    elseif formationTable.COLUMN == chosenFormation then
+        formationLabel = "COLUMN"
+    else
+        formationLabel = "UNKNOWN"
+    end
+
     local dcsGroup = self.Group:GetDCSObject()
-    if not dcsGroup then return nil end
+    if not dcsGroup then
+        return
+    end
 
     local controller = dcsGroup:getController()
-    if not controller then return nil end
+    if not controller then
+        return
+    end
+
+    local ok, err = pcall(function()
+        controller:setOption(formationId, chosenFormation)
+    end)
+
+    if not ok then
+        self:Log("WARNING", string.format("%s failed to enforce convoy formation: %s", self.Name, tostring(err)))
+        return
+    end
+
+    if self.LastFormationApplied ~= formationLabel then
+        self.LastFormationApplied = formationLabel
+        self:Log("DEBUG", string.format("%s formation locked to %s", self.Name, formationLabel))
+    end
+end
+
+--- Retrieve the current DCS route endpoint for comparison
+-- @return #table|nil Vec2 of last waypoint when a mission route is active
+-- @return #string Current controller task classification ("MISSION", "STOP", "NONE", etc.)
+function MOOSE_CONVOY:GetRouteEndpointVec2()
+    if not self.Group then return nil, "NO_GROUP" end
+    local dcsGroup = self.Group:GetDCSObject()
+    if not dcsGroup then return nil, "NO_GROUP_OBJECT" end
+
+    local controller = dcsGroup:getController()
+    if not controller then return nil, "NO_CONTROLLER" end
 
     local ok, task = pcall(function()
         return controller:getTask()
     end)
 
-    if not ok or not task or task.id ~= "Mission" then
-        return nil
+    if not ok or not task then
+        return nil, "NO_TASK"
     end
 
-    local route = task.params and task.params.route and task.params.route.points
+    local function unwrapControlledTask(candidate)
+        if not candidate then
+            return nil
+        end
+        if candidate.id == "ControlledTask" and candidate.params and candidate.params.task then
+            return unwrapControlledTask(candidate.params.task)
+        end
+        return candidate
+    end
+
+    local missionTask = unwrapControlledTask(task)
+    if not missionTask then
+        return nil, "NO_TASK"
+    end
+
+    if missionTask.id == "WrappedAction" then
+        local action = missionTask.params and missionTask.params.action
+        local actionId = action and action.id
+        if actionId == "Stop" then
+            return nil, "STOP"
+        end
+        return nil, actionId or "WRAPPED_ACTION"
+    end
+
+    if missionTask.id ~= "Mission" then
+        return nil, missionTask.id or "UNKNOWN_TASK"
+    end
+
+    local route = missionTask.params and missionTask.params.route and missionTask.params.route.points
     if not route or #route == 0 then
-        return nil
+        return nil, "NO_ROUTE"
     end
 
     local lastPoint = route[#route]
     if not lastPoint or not lastPoint.x or not lastPoint.y then
-        return nil
+        return nil, "INVALID_ROUTE"
     end
 
-    return { x = lastPoint.x, y = lastPoint.y }
+    self.HasSeenMissionRoute = true
+    return { x = lastPoint.x, y = lastPoint.y }, "MISSION"
 end
 
 --- Detect and correct manual route edits while convoy is in motion
-function MOOSE_CONVOY:MonitorRouteIntegrity()
+function MOOSE_CONVOY:MonitorRouteIntegrity(forceOverride)
+    forceOverride = forceOverride or false
     if not self.DestPoint or not self.Group or not self.Group:IsAlive() then
         return
     end
 
+    -- In hard-lock mode, once we are in contact we do not attempt to
+    -- correct or reapply any mission routes. Any player-added routes
+    -- should be immediately cancelled by the hold logic instead.
+    if CONVOY_HARD_LOCK_ON_THREAT and self.InContact then
+        -- Ensure the controller remains in a STOP state; do not
+        -- issue new RouteGroundOnRoad tasks while threats remain.
+        self.Group:RouteStop()
+        self.LastRouteStopTime = timer.getTime()
+        return
+    end
+
     local now = timer.getTime()
+    local lastCommand = self.LastRouteCommandTime or 0
+    if lastCommand > 0 and (now - lastCommand) < ROUTE_TASK_GRACE_PERIOD then
+        return
+    end
+
     local lastCheck = self.LastRouteCheck or 0
     if lastCheck > 0 and (now - lastCheck) < ROUTE_CHECK_INTERVAL then
         return
     end
 
     self.LastRouteCheck = now
+
+    local resumeTimestamp = self.LastHoldReleaseTime or 0
+    if resumeTimestamp > 0 and (now - resumeTimestamp) < ROUTE_RESUME_GRACE_PERIOD then
+        return
+    end
 
     local expected = self.ExpectedRouteEndpoint
     if not expected and self.DestPoint and self.DestPoint.GetVec2 then
@@ -451,13 +988,17 @@ function MOOSE_CONVOY:MonitorRouteIntegrity()
     if not expected then
         return
     end
-    local routeEnd = self:GetRouteEndpointVec2()
+    local routeEnd, taskState = self:GetRouteEndpointVec2()
+
+    if taskState == "STOP" then
+        -- DCS controller is still honouring a RouteStop action; wait for the mission task to return
+        return
+    end
 
     if not routeEnd then
-        self:Log("WARNING", string.format("%s route task missing - reapplying destination", self.Name))
-        if self:ApplyRouteToDestination("ROUTE_RESTORE", false, true) then
-            self:AnnounceRouteOverride()
-        end
+        -- DCS is not exposing a Mission route task; as long as we are not
+        -- in contact, trust the last issued order and avoid trying to
+        -- "fix" the route, which can cause constant jinking.
         return
     end
 
@@ -466,9 +1007,21 @@ function MOOSE_CONVOY:MonitorRouteIntegrity()
     local distance = math.sqrt(dx * dx + dy * dy)
 
     if distance > ROUTE_DEVIATION_THRESHOLD then
+        if lastCommand > 0 and (now - lastCommand) < ROUTE_REISSUE_MIN_INTERVAL then
+            self.RouteNeedsRefresh = true
+            return
+        end
+
         self:Log("WARNING", string.format("%s route deviation detected (%.0fm)", self.Name, distance))
-        if self:ApplyRouteToDestination("ROUTE_CORRECTION", false, true) then
+        local routeApplied = self:ApplyRouteToDestination("ROUTE_CORRECTION", forceOverride, forceOverride)
+        if routeApplied then
             self:AnnounceRouteOverride(distance)
+            if self.Group and self.Group:IsAlive() and (forceOverride or self.InContact) then
+                self.Group:RouteStop()
+                self.LastRouteStopTime = now
+            end
+        else
+            self.RouteNeedsRefresh = true
         end
     end
 end
@@ -482,13 +1035,19 @@ function MOOSE_CONVOY:AnnounceRouteOverride(deviationMeters)
         return
     end
 
+    if not deviationMeters then
+        self.LastRouteWarning = now
+        self:Log("DEBUG", string.format("%s route restore issued with no deviation; suppressing player notice", self.Name))
+        return
+    end
+
     self.LastRouteWarning = now
     local deviationText = deviationMeters and string.format(" (override %.0fm)", deviationMeters) or ""
     local messageText = string.format("%s - Mission route restored%s. Convoy continues to assigned destination.", self.Name, deviationText)
 
     local coalitionID = self.Coalition
     if coalitionID then
-        MESSAGE:New(messageText, 15):ToCoalition(coalitionID)
+        MESSAGE:New(messageText, MESSAGE_DURATION_DEFAULT):ToCoalition(coalitionID)
     else
         self:MessageToAll(messageText)
     end
@@ -526,13 +1085,13 @@ function MOOSE_CONVOY:RedirectTo(newCoordinate, params)
         self:ApplyRouteToDestination(reason, false, true)
     end
 
-    local destLL = newCoordinate:ToStringLLDMS()
+    local destText = self:FormatCoordinateForMessage(newCoordinate)
     local labelText = params and params.label and params.label ~= "" and params.label or nil
     local messageText
     if labelText then
-        messageText = string.format("%s - Redirected to '%s'. Coordinates: %s", self.Name, labelText, destLL)
+        messageText = string.format("%s - Redirected to '%s'. Coordinates: %s", self.Name, labelText, destText)
     else
-        messageText = string.format("%s - Redirected to new player destination. Coordinates: %s", self.Name, destLL)
+        messageText = string.format("%s - Redirected to new player destination. Coordinates: %s", self.Name, destText)
     end
 
     if self.InContact then
@@ -541,7 +1100,7 @@ function MOOSE_CONVOY:RedirectTo(newCoordinate, params)
 
     if params and params.notify ~= false then
         if params and params.coalition then
-            MESSAGE:New(messageText, 15):ToCoalition(params.coalition)
+            MESSAGE:New(messageText, MESSAGE_DURATION_DEFAULT):ToCoalition(params.coalition)
         else
             self:MessageToAll(messageText)
         end
@@ -557,15 +1116,19 @@ function MOOSE_CONVOY:EnforceHold(reason)
         return
     end
 
+    -- Always issue a stop when in a hold
     self.Group:RouteStop()
+    self.LastRouteStopTime = timer.getTime()
 
     local now = timer.getTime()
     local last = self.LastHoldEnforce or 0
     if last > 0 and (now - last) < 8 then
-        return -- keep messages from spamming players
+        -- Always keep the AI stopped, but avoid spamming player messages.
+        return
     end
 
     self.LastHoldEnforce = now
+    self.LastHoldReleaseTime = nil
 
     local holdLabel = (self.ContactReason == "UNDER_FIRE") and "TAKING FIRE" or "ENEMY SPOTTED"
     local distanceInfo = ""
@@ -576,14 +1139,27 @@ function MOOSE_CONVOY:EnforceHold(reason)
         end
     end
 
+    -- If hard-lock is disabled we still enforce RouteStop, but we
+    -- treat continued movement as a player override and reduce spam.
     local msg
-    if reason == "MOVEMENT" then
-        msg = string.format("%s - HOLD ORDER ACTIVE (%s). Movement blocked until CAS clears the route.%s", self.Name, holdLabel, distanceInfo)
-    elseif reason == "INITIAL" then
-        -- Already announced contact; just ensure players know the stop is intentional without repeating the full call
-        msg = string.format("%s - Holding position (%s). Await CAS before resuming.%s", self.Name, holdLabel, distanceInfo)
+    if CONVOY_HARD_LOCK_ON_THREAT then
+        if reason == "MOVEMENT" then
+            msg = string.format("%s - HOLD ORDER ACTIVE (%s). Movement blocked until CAS clears the route.%s", self.Name, holdLabel, distanceInfo)
+        elseif reason == "INITIAL" then
+            -- Already announced contact; just ensure players know the stop is intentional without repeating the full call
+            msg = string.format("%s - Holding position (%s). Await CAS before resuming.%s", self.Name, holdLabel, distanceInfo)
+        else
+            msg = string.format("%s - Maintaining defensive hold (%s). Awaiting CAS.%s", self.Name, holdLabel, distanceInfo)
+        end
     else
-        msg = string.format("%s - Maintaining defensive hold (%s). Awaiting CAS.%s", self.Name, holdLabel, distanceInfo)
+        if reason == "INITIAL" then
+            msg = string.format("%s - Holding position (%s). Await CAS before resuming.%s", self.Name, holdLabel, distanceInfo)
+        elseif reason == "MOVEMENT" then
+            -- Player is likely forcing a move; issue a softer reminder with cooldown
+            msg = string.format("%s - HOLD ORDER ACTIVE (%s). You may override movement manually, but route is still unsafe.%s", self.Name, holdLabel, distanceInfo)
+        else
+            msg = string.format("%s - Maintaining defensive hold (%s). Threats not yet cleared.%s", self.Name, holdLabel, distanceInfo)
+        end
     end
 
     if msg then
@@ -694,6 +1270,13 @@ function MOOSE_CONVOY:NewConvoy(templateName, spawnPoint, destPoint, convoyCoali
         RouteNeedsRefresh = false,
         ExpectedRouteEndpoint = nil,
         LastRouteWarning = 0,
+        LastRouteMissingLog = 0,
+        LastRouteCommandTime = 0,
+        LastResumeMessageTime = nil,
+        LastFormationApplied = nil,
+        HasSeenMissionRoute = false,
+        LastHumanControlNoticeTime = nil,
+        LastScriptControlNoticeTime = nil,
     }
 
     if destPoint and destPoint.GetVec2 then
@@ -815,15 +1398,39 @@ function MOOSE_CONVOY:Update()
         return
     end
     
-    -- Check for threats
+    -- Check for threats / enforce holds
     if self.Status == "MOVING" then
         self:CheckForThreats()
     elseif self.Status == "CONTACT" or self.Status == "STUCK" then
         self:CheckThreatsCleared()
+
         if self.InContact then
             local speed = self:GetCurrentSpeedKmh()
-            if speed > 1.5 then
-                self:EnforceHold("MOVEMENT")
+
+            if CONVOY_HARD_LOCK_ON_THREAT then
+                -- In hard-lock mode we want speed effectively zero while in
+                -- contact, regardless of player-added waypoints.
+                if speed > 0.5 then
+                    MOOSE_CONVOY:Log("DEBUG", string.format("%s hard-lock CONTACT: speed %.1f km/h, issuing RouteStop", self.Name, speed))
+                    self:EnforceHold("MOVEMENT")
+                else
+                    -- Even when stopped, keep the controller pinned to STOP
+                    -- so no latent route tasks start rolling us forward.
+                    self:MonitorRouteIntegrity(true)
+                end
+            else
+                -- Override-friendly mode: still try to hold, but only
+                -- announce once per contact episode when the player keeps
+                -- moving.
+                if speed > 1.5 then
+                    if not self.OverrideModeHoldNotified then
+                        self.OverrideModeHoldNotified = true
+                        self:EnforceHold("MOVEMENT")
+                    end
+                else
+                    self.OverrideModeHoldNotified = nil
+                    self:MonitorRouteIntegrity(true)
+                end
             end
         end
     end
@@ -845,16 +1452,48 @@ function MOOSE_CONVOY:Update()
     end
 
     if self.Status == "MOVING" and not self.InContact then
+        local speed = self:GetCurrentSpeedKmh()
+
+        -- If we are essentially stopped well short of destination, assume
+        -- external control has parked the convoy and reassert our route.
+        if speed < 1.0 and distanceRemaining > (DESTINATION_REACHED_DISTANCE * 3) then
+            local lastCommand = self.LastRouteCommandTime or 0
+            if lastCommand <= 0 or (currentTime - lastCommand) >= ROUTE_REISSUE_MIN_INTERVAL then
+                local msg = string.format("%s - We've been idle short of the objective. Resuming convoy movement to assigned destination.", self.Name)
+                local lastScript = self.LastScriptControlNoticeTime or 0
+                if lastScript <= 0 or (currentTime - lastScript) >= 60 then
+                    self.LastScriptControlNoticeTime = currentTime
+                    self:MessageToAll(msg)
+                end
+                self:ApplyRouteToDestination("STOPPED_RECOVERY", true, false)
+            end
+        elseif speed >= 1.0 and distanceRemaining > (DESTINATION_REACHED_DISTANCE * 3) then
+            -- Convoy moving but clearly not at destination: likely under
+            -- human/GC routing. Acknowledge once per episode and defer.
+            if not self.LastHumanControlNoticeTime or self.LastHumanControlNoticeTime <= 0 then
+                self.LastHumanControlNoticeTime = currentTime
+                local msg = string.format("%s - Higher command routing received. Following current orders until halted or objective reached.", self.Name)
+                self:MessageToAll(msg)
+            end
+        end
+
         self:MonitorRouteIntegrity()
     elseif not self.InContact and self.RouteNeedsRefresh then
-        self:ApplyRouteToDestination("PENDING_RESTORE", false, true)
+        local lastCommand = self.LastRouteCommandTime or 0
+        if lastCommand <= 0 or (currentTime - lastCommand) >= ROUTE_REISSUE_MIN_INTERVAL then
+            if not self:ApplyRouteToDestination("PENDING_RESTORE", false, false) then
+                self.RouteNeedsRefresh = true
+            end
+        end
     end
 end
 
 --- Check for nearby threats
 function MOOSE_CONVOY:CheckForThreats()
-    MOOSE_CONVOY:Log("DEBUG", string.format("%s threat scan tick", self.Name))
     local currentPos = self.Group:GetCoordinate()
+    if not currentPos then
+        return
+    end
 
     local enemyCoalition = (self.Coalition == coalition.side.RED) and "blue" or "red"
 
@@ -873,9 +1512,6 @@ function MOOSE_CONVOY:CheckForThreats()
             local coord = group:GetCoordinate()
             if coord then
                 local distance = currentPos:Get2DDistance(coord)
-                local groupName = group:GetName() or "<enemy group>"
-                MOOSE_CONVOY:Log("DEBUG", string.format("%s scanning group %s at %.0fm", self.Name, groupName, distance))
-
                 if distance < THREAT_DETECTION_RANGE then
                     threatsFound = true
                     if distance < closestDistance then
@@ -894,8 +1530,6 @@ function MOOSE_CONVOY:CheckForThreats()
         end
         MOOSE_CONVOY:Log("WARNING", string.format("%s detected threat at %.0fm", self.Name, closestDistance))
         self:OnContactWithEnemy(enemyUnit, "DETECTION")
-    else
-        MOOSE_CONVOY:Log("DEBUG", string.format("%s scan clear (no threats within %.1f km)", self.Name, THREAT_DETECTION_RANGE / 1000))
     end
 end
 
@@ -915,7 +1549,15 @@ function MOOSE_CONVOY:OnContactWithEnemy(enemyUnit, reason)
         return
     end
 
-    local enemyCoord = MOOSE_CONVOY:GetUnitCoordinate(enemyUnit) or self.EnemyPosition
+    local enemyCoord = self.EnemyPosition
+    if enemyUnit and enemyUnit.GetCoordinate then
+        local ok, coord = pcall(function()
+            return enemyUnit:GetCoordinate()
+        end)
+        if ok and coord then
+            enemyCoord = coord
+        end
+    end
     if enemyCoord then
         self.EnemyPosition = enemyCoord
     end
@@ -930,12 +1572,14 @@ function MOOSE_CONVOY:OnContactWithEnemy(enemyUnit, reason)
         self.LastHoldEnforce = 0
 
         self.Group:RouteStop()
+        self.LastRouteStopTime = timer.getTime()
         self.RouteNeedsRefresh = true
+        self.LastHoldReleaseTime = nil
 
         if SMOKE_ON_CONTACT then
-            currentPos:Smoke(FRIENDLY_SMOKE_COLOR)
+            self:MaybeSmokeAt(currentPos, FRIENDFLY_SMOKE_COLOR)
             if self.EnemyPosition then
-                self.EnemyPosition:Smoke(ENEMY_SMOKE_COLOR)
+                self:MaybeSmokeAt(self.EnemyPosition, ENEMY_SMOKE_COLOR)
             end
         end
     else
@@ -945,10 +1589,10 @@ function MOOSE_CONVOY:OnContactWithEnemy(enemyUnit, reason)
         self.LastHoldEnforce = 0
         self.RouteNeedsRefresh = true
         if SMOKE_ON_CONTACT and self.ContactPosition then
-            self.ContactPosition:Smoke(FRIENDLY_SMOKE_COLOR)
+            self:MaybeSmokeAt(self.ContactPosition, FRIENDFLY_SMOKE_COLOR)
         end
         if SMOKE_ON_CONTACT and self.EnemyPosition then
-            self.EnemyPosition:Smoke(ENEMY_SMOKE_COLOR)
+            self:MaybeSmokeAt(self.EnemyPosition, ENEMY_SMOKE_COLOR)
         end
     end
 
@@ -980,8 +1624,8 @@ function MOOSE_CONVOY:OnContactWithEnemy(enemyUnit, reason)
     self:MessageToAll(leadMessage)
 
     if self.EnemyPosition then
-        local enemyLL = self.EnemyPosition:ToStringLLDMS()
-        self:MessageToAll(string.format("%s - %s. Enemy position: %s. Smoke: Green on convoy, Red on enemy.", self.Name, holdLabel, enemyLL))
+        local enemyPosText = self:FormatCoordinateForMessage(self.EnemyPosition)
+        self:MessageToAll(string.format("%s - %s. Enemy position: %s. Smoke: Green on convoy, Red on enemy.", self.Name, holdLabel, enemyPosText))
     else
         self:MessageToAll(string.format("%s - %s. Enemy position unknown, search for smoke markers.", self.Name, holdLabel))
     end
@@ -1021,8 +1665,10 @@ end
 
 --- Check if threats have been cleared
 function MOOSE_CONVOY:CheckThreatsCleared()
-    MOOSE_CONVOY:Log("DEBUG", string.format("%s checking threat clearance", self.Name))
     local currentPos = self.Group:GetCoordinate()
+    if not currentPos then
+        return
+    end
 
     local enemyCoalition = (self.Coalition == coalition.side.RED) and "blue" or "red"
 
@@ -1039,8 +1685,6 @@ function MOOSE_CONVOY:CheckThreatsCleared()
             local coord = group:GetCoordinate()
             if coord then
                 local distance = currentPos:Get2DDistance(coord)
-                local groupName = group:GetName() or "<enemy group>"
-                MOOSE_CONVOY:Log("DEBUG", string.format("%s clearance check sees %s at %.0fm", self.Name, groupName, distance))
                 if distance < THREAT_CLEARED_RANGE then
                     threatsRemain = true
                 end
@@ -1061,6 +1705,7 @@ function MOOSE_CONVOY:OnThreatsCleared()
         return
     end
     
+    local now = timer.getTime()
     MOOSE_CONVOY:Log("INFO", string.format("%s threats cleared - resuming movement", self.Name))
     
     self.Status = "MOVING"
@@ -1070,41 +1715,57 @@ function MOOSE_CONVOY:OnThreatsCleared()
     self.ContactPosition = nil
     self.LastUnderFireAlert = 0
     self.LastHoldEnforce = 0
+    self.LastHoldReleaseTime = nil
     
     -- Pop smoke on current position
     if SMOKE_ON_CLEAR then
         local currentPos = self.Group:GetCoordinate()
-        currentPos:Smoke(FRIENDLY_SMOKE_COLOR)
+        self:MaybeSmokeAt(currentPos, FRIENDFLY_SMOKE_COLOR)
     end
     
-    self:MessageToAll(string.format(
-        "%s - Area clear! Threats eliminated. Resuming movement to destination. Thank you for the support!",
-        self.Name
-    ))
+    local lastResume = self.LastResumeMessageTime
+    local allowResumeMessage = true
+    if lastResume and RESUME_MESSAGE_COOLDOWN and RESUME_MESSAGE_COOLDOWN > 0 then
+        if (now - lastResume) < RESUME_MESSAGE_COOLDOWN then
+            allowResumeMessage = false
+        end
+    end
+
+    if allowResumeMessage then
+        self:MessageToAll(string.format(
+            "%s - Area clear! Threats eliminated. Resuming movement to destination. Thank you for the support!",
+            self.Name
+        ))
+        self.LastResumeMessageTime = now
+    else
+        MOOSE_CONVOY:Log("DEBUG", string.format("%s resume notice suppressed (%.0fs since last)", self.Name, now - lastResume))
+    end
     
     -- Resume journey
-    self.LastProgressTime = timer.getTime()
+    self.LastProgressTime = now
     local currentPos = self.Group:GetCoordinate()
-    self:ApplyRouteToDestination("THREATS_CLEARED", true, true)
+    if self:ApplyRouteToDestination("THREATS_CLEARED", true, true) then
+        self.LastHoldReleaseTime = now
+    end
 end
 
 --- Announce convoy is stuck and needs help
 function MOOSE_CONVOY:AnnounceStuck()
     local currentPos = self.Group:GetCoordinate()
-    local currentLL = currentPos:ToStringLLDMS()
+    local currentText = self:FormatCoordinateForMessage(currentPos)
     local distanceRemaining = currentPos:Get2DDistance(self.DestPoint)
     
     local followUp
     if self.ContactReason == "UNDER_FIRE" then
-        followUp = string.format("%s - Still taking fire! Position: %s. Destination %.1f km away. Need CAS immediately!", self.Name, currentLL, distanceRemaining / 1000)
+        followUp = string.format("%s - Still taking fire! Position: %s. Destination %.1f km away. Need CAS immediately!", self.Name, currentText, distanceRemaining / 1000)
     else
-        followUp = string.format("%s - Still holding for CAS. Position: %s. Destination %.1f km away. Awaiting air support to clear the route.", self.Name, currentLL, distanceRemaining / 1000)
+        followUp = string.format("%s - Still holding for CAS. Position: %s. Destination %.1f km away. Awaiting air support to clear the route.", self.Name, currentText, distanceRemaining / 1000)
     end
 
     self:MessageToAll(followUp)
     
-    -- Pop smoke again
-    currentPos:Smoke(FRIENDLY_SMOKE_COLOR)
+    -- Pop smoke again (throttled)
+    self:MaybeSmokeAt(currentPos, FRIENDFLY_SMOKE_COLOR)
 end
 
 --- Announce progress update
@@ -1143,6 +1804,37 @@ function MOOSE_CONVOY:AnnounceProgress()
     ))
 end
 
+--- Safely and throttled smoke at a coordinate
+-- @param coord #COORDINATE or vec3-like table
+-- @param color #number SMOKECOLOR
+function MOOSE_CONVOY:MaybeSmokeAt(coord, color)
+    if not coord then return end
+
+    local now = timer.getTime()
+    local id = self.ID or 0
+    local last = MOOSE_CONVOY.LastSmokeTime[id] or 0
+    if SMOKE_MIN_INTERVAL and SMOKE_MIN_INTERVAL > 0 then
+        if last > 0 and (now - last) < SMOKE_MIN_INTERVAL then
+            return
+        end
+    end
+
+    local vec3
+    if type(coord) == "table" and coord.GetVec3 then
+        vec3 = coord:GetVec3()
+    else
+        vec3 = coord
+    end
+
+    if not vec3 or not vec3.x or not vec3.z then
+        return
+    end
+
+    trigger.action.smoke(vec3, color or FRIENDLY_SMOKE_COLOR)
+    MOOSE_CONVOY.LastSmokeTime[id] = now
+end
+
+
 --- Called when convoy reaches destination
 function MOOSE_CONVOY:OnReachedDestination()
     MOOSE_CONVOY:Log("INFO", string.format("%s reached destination successfully", self.Name))
@@ -1160,7 +1852,7 @@ function MOOSE_CONVOY:OnReachedDestination()
     
     -- Pop green smoke
     local currentPos = self.Group:GetCoordinate()
-    currentPos:Smoke(FRIENDLY_SMOKE_COLOR)
+    self:MaybeSmokeAt(currentPos, FRIENDFLY_SMOKE_COLOR)
     
     -- Stop monitoring
     if self.SchedulerID then
@@ -1171,6 +1863,7 @@ function MOOSE_CONVOY:OnReachedDestination()
     SCHEDULER:New(nil,
         function()
             MOOSE_CONVOY.Convoys[self.ID] = nil
+            MOOSE_CONVOY:ClearIntelForConvoy(self)
             if self.Group and self.Group:IsAlive() then
                 self.Group:Destroy()
             end
@@ -1195,13 +1888,14 @@ function MOOSE_CONVOY:OnDestroyed()
         self.SchedulerID:Stop()
     end
     
-    -- Remove from active convoys
+    -- Remove from active convoys and clear any intel marks
     MOOSE_CONVOY.Convoys[self.ID] = nil
+    MOOSE_CONVOY:ClearIntelForConvoy(self)
 end
 
 --- Send message to all players
 function MOOSE_CONVOY:MessageToAll(message)
-    MESSAGE:New(message, 15):ToAll()
+    MESSAGE:New(message, MESSAGE_DURATION_DEFAULT):ToAll()
     MOOSE_CONVOY:Log("DEBUG", string.format("Message broadcast: %s", message))
 end
 
@@ -1218,6 +1912,11 @@ function MOOSE_CONVOY:MarkHandler(EventData)
     
     -- Ignore empty marks or marks with only whitespace
     if not markText or markText == "" or markText:match("^%s*$") then
+        return
+    end
+
+    if self:IsIntelMark(markID) then
+        self:Log("DEBUG", string.format("Ignoring convoy intel mark ID %s", tostring(markID)))
         return
     end
     
@@ -1269,7 +1968,7 @@ function MOOSE_CONVOY:HandleSpawnMark(coordinate, markText, markCoalition, markI
                 nearestZone and nearestZone.name or "None",
                 distance or 0
             )
-            MESSAGE:New(msg, 15):ToCoalition(markCoalition)
+            MESSAGE:New(msg, MESSAGE_DURATION_DEFAULT):ToCoalition(markCoalition)
             MOOSE_CONVOY:Log("WARNING", msg)
             -- Delete the mark since it was processed (even if rejected)
             if markID then
@@ -1300,7 +1999,7 @@ function MOOSE_CONVOY:HandleSpawnMark(coordinate, markText, markCoalition, markI
     }
     
     if PLAYER_CONTROLLED_DESTINATIONS then
-        MESSAGE:New(string.format("%s convoy spawn point recorded. Place a second mark with '%s' when ready.", coalitionName, CONVOY_DEST_KEYWORD), 10):ToCoalition(markCoalition)
+        MESSAGE:New(string.format("%s convoy spawn point recorded. Place a second mark with '%s' when ready.", coalitionName, CONVOY_DEST_KEYWORD), MESSAGE_DURATION_SHORT):ToCoalition(markCoalition)
     else
         -- Static destinations - auto-select or show menu
         self:HandleStaticDestination(markCoalition)
@@ -1391,7 +2090,7 @@ function MOOSE_CONVOY:HandleDestinationMark(coordinate, markText, markCoalition,
     MOOSE_CONVOY:Log("INFO", string.format("Processing destination mark for coalition %d", markCoalition))
     
     if not PLAYER_CONTROLLED_DESTINATIONS then
-        MESSAGE:New("Convoy destinations are controlled by mission designer. Remove mark.", 10):ToCoalition(markCoalition)
+        MESSAGE:New("Convoy destinations are controlled by mission designer. Remove mark.", MESSAGE_DURATION_SHORT):ToCoalition(markCoalition)
         -- Delete the mark
         if markID then
             trigger.action.removeMark(markID)
@@ -1412,7 +2111,7 @@ function MOOSE_CONVOY:HandleDestinationMark(coordinate, markText, markCoalition,
                 distance / 1000,
                 MINIMUM_ROUTE_DISTANCE / 1000
             )
-            MESSAGE:New(msg, 15):ToCoalition(markCoalition)
+            MESSAGE:New(msg, MESSAGE_DURATION_DEFAULT):ToCoalition(markCoalition)
             MOOSE_CONVOY:Log("WARNING", msg)
             -- Delete the mark even though it was rejected
             if markID then
@@ -1449,7 +2148,7 @@ function MOOSE_CONVOY:HandleDestinationMark(coordinate, markText, markCoalition,
             })
         else
             local coalitionName = markCoalition == coalition.side.BLUE and "Blue" or "Red"
-            MESSAGE:New(string.format("No active %s convoy available to redirect.", coalitionName), 10):ToCoalition(markCoalition)
+            MESSAGE:New(string.format("No active %s convoy available to redirect.", coalitionName), MESSAGE_DURATION_SHORT):ToCoalition(markCoalition)
             if markID then
                 trigger.action.removeMark(markID)
                 MOOSE_CONVOY:Log("DEBUG", "Removed unused destination mark ID: " .. tostring(markID))
@@ -1468,7 +2167,7 @@ function MOOSE_CONVOY:HandleStaticDestination(markCoalition)
     
     -- If no static destinations defined, error
     if #STATIC_DESTINATIONS == 0 then
-        MESSAGE:New("No static destinations configured. Contact mission designer.", 15):ToCoalition(markCoalition)
+        MESSAGE:New("No static destinations configured. Contact mission designer.", MESSAGE_DURATION_DEFAULT):ToCoalition(markCoalition)
         MOOSE_CONVOY.PendingSpawns[markCoalition] = nil
         return
     end
@@ -1491,7 +2190,7 @@ function MOOSE_CONVOY:HandleStaticDestination(markCoalition)
     end
     
     if not destCoord then
-        MESSAGE:New("Invalid destination configuration. Contact mission designer.", 15):ToCoalition(markCoalition)
+        MESSAGE:New("Invalid destination configuration. Contact mission designer.", MESSAGE_DURATION_DEFAULT):ToCoalition(markCoalition)
         MOOSE_CONVOY.PendingSpawns[markCoalition] = nil
         return
     end
@@ -1499,7 +2198,7 @@ function MOOSE_CONVOY:HandleStaticDestination(markCoalition)
     -- Validate minimum distance
     local distance = pendingSpawn.Position:Get2DDistance(destCoord)
     if distance < MINIMUM_ROUTE_DISTANCE then
-        MESSAGE:New(string.format("Selected destination too close (%.1f km). Trying another...", distance / 1000), 10):ToCoalition(markCoalition)
+        MESSAGE:New(string.format("Selected destination too close (%.1f km). Trying another...", distance / 1000), MESSAGE_DURATION_SHORT):ToCoalition(markCoalition)
         -- Could implement retry logic here
         MOOSE_CONVOY.PendingSpawns[markCoalition] = nil
         return
@@ -1699,7 +2398,7 @@ function MOOSE_CONVOY:ReportValidationResults(allPassed, results)
     report[#report + 1] = "═══════════════════════════════════════"
     
     local reportText = table.concat(report, "\n")
-    MESSAGE:New(reportText, 30):ToAll()
+    MESSAGE:New(reportText, MESSAGE_DURATION_LONG):ToAll()
     
     self:Log("INFO", "Validation report displayed to players")
 end
@@ -1716,6 +2415,9 @@ function MOOSE_CONVOY:Initialize()
 
     -- Ensure combat events are wired before convoys spawn
     self:SetupEventHandlers()
+
+    -- Create F10 menus for situational awareness
+    self:SetupCoalitionMenus()
     
     -- Set up mark event handler using world.event
     self:Log("INFO", "Setting up mark event handler...")
@@ -1726,6 +2428,10 @@ function MOOSE_CONVOY:Initialize()
         MOOSE_CONVOY.PendingMarks = MOOSE_CONVOY.PendingMarks or {}
 
         if event.id == world.event.S_EVENT_MARK_REMOVED then
+            if event.idx and MOOSE_CONVOY:IsIntelMark(event.idx) then
+                MOOSE_CONVOY:HandleIntelMarkRemoval(event.idx)
+                MOOSE_CONVOY:Log("DEBUG", string.format("Intel mark ID %s removed", tostring(event.idx)))
+            end
             MOOSE_CONVOY.PendingMarks[event.idx] = nil
             if MOOSE_CONVOY.PendingSpawns then
                 for coalitionID, pending in pairs(MOOSE_CONVOY.PendingSpawns) do
@@ -1757,11 +2463,14 @@ function MOOSE_CONVOY:Initialize()
             return
         end
 
-        env.info("[MOOSE_CONVOY] RAW MARK EVENT DETECTED!")
-        env.info(string.format("[MOOSE_CONVOY] Mark text: '%s', Coalition: %s, initiator: %s", 
-            tostring(event.text), 
-            tostring(event.coalition),
-            tostring(event.initiator)))
+        local intelMark = event.idx and MOOSE_CONVOY:IsIntelMark(event.idx)
+        if not intelMark then
+            env.info("[MOOSE_CONVOY] RAW MARK EVENT DETECTED!")
+            env.info(string.format("[MOOSE_CONVOY] Mark text: '%s', Coalition: %s, initiator: %s", 
+                tostring(event.text), 
+                tostring(event.coalition),
+                tostring(event.initiator)))
+        end
 
         -- Convert to MOOSE-style EventData
         local EventData = {
@@ -1778,7 +2487,7 @@ function MOOSE_CONVOY:Initialize()
     world.addEventHandler(ConvoyMarkHandler)
     
     self:Log("INFO", "Mark event handler registered successfully")
-    MESSAGE:New("CONVOY SYSTEM: Mark handler active. Place marks with 'convoy' to test.", 15):ToAll()
+    MESSAGE:New("CONVOY SYSTEM: Mark handler active. Place marks with 'convoy' to test.", MESSAGE_DURATION_DEFAULT):ToAll()
     
     if allPassed then
         self:Log("INFO", "Initialization complete - all systems operational")
