@@ -13853,6 +13853,11 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     self._ZoneActive.MASH = self._ZoneActive.MASH or {}
     self._ZoneActive.MASH[displayName] = true
 
+    -- Add zone to MASHZones array so it's recognized by the system
+    self.MASHZones = self.MASHZones or {}
+    table.insert(self.MASHZones, zoneObj)
+    _logDebug(string.format('[MobileMASH] Added zone to MASHZones array, total count: %d', #self.MASHZones))
+
     local md = self.Config and self.Config.MapDraw or {}
     if md.Enabled then
       local ok, err = pcall(function() self:DrawZonesOnMap() end)
@@ -13921,6 +13926,36 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
       _logDebug(string.format('[MobileMASH] Announcement scheduler started every %.1fs', cfg.MobileMASH.AnnouncementInterval))
     end
 
+    -- Create a separate frequent position update scheduler for mobile MASH tracking
+    -- This ensures the zone follows the vehicle even if announcements are infrequent
+    local ctldInstance = self
+    local positionUpdateInterval = 5  -- Update position every 5 seconds
+    local posScheduler = SCHEDULER:New(nil, function()
+      local ok, err = pcall(function()
+        if not groupIsAlive() then
+          ctldInstance:_RemoveMobileMASH(mashId)
+          return
+        end
+
+        local vec3 = groupVec3()
+        if vec3 then
+          mashData.position = { x = vec3.x, z = vec3.z }
+          if mashData.zone then
+            if mashData.zone.SetPointVec3 then
+              mashData.zone:SetPointVec3({ x = vec3.x, y = vec3.y or 0, z = vec3.z })
+            elseif mashData.zone.SetVec2 then
+              mashData.zone:SetVec2({ x = vec3.x, y = vec3.z })
+            end
+          end
+          _logDebug(string.format('[MobileMASH] Position updated for %s at (%.1f, %.1f)', displayName, vec3.x, vec3.z))
+        end
+      end)
+      if not ok then _logError('Mobile MASH position update scheduler error: '..tostring(err)) end
+    end, {}, positionUpdateInterval, positionUpdateInterval)
+
+    mashData.positionScheduler = posScheduler
+    _logDebug(string.format('[MobileMASH] Position update scheduler started every %ds', positionUpdateInterval))
+
     if EVENTHANDLER then
       local ctldInstance = self
       local eventHandler = EVENTHANDLER:New()
@@ -13962,9 +13997,12 @@ function CTLD:_RemoveMobileMASH(mashId)
   
   local mash = CTLD._mashZones[mashId]
   if mash then
-    -- Stop scheduler
+    -- Stop schedulers
     if mash.scheduler then
       mash.scheduler:Stop()
+    end
+    if mash.positionScheduler then
+      mash.positionScheduler:Stop()
     end
     
     -- Remove map drawings
@@ -13974,6 +14012,17 @@ function CTLD:_RemoveMobileMASH(mashId)
     if self._ZoneDefs and self._ZoneDefs.MASHZones then self._ZoneDefs.MASHZones[name] = nil end
     if self._ZoneActive and self._ZoneActive.MASH then self._ZoneActive.MASH[name] = nil end
     self:_removeZoneDrawing('MASH', name)
+    
+    -- Remove from MASHZones array
+    if self.MASHZones and mash.zone then
+      for i = #self.MASHZones, 1, -1 do
+        if self.MASHZones[i] == mash.zone then
+          table.remove(self.MASHZones, i)
+          _logDebug(string.format('[MobileMASH] Removed zone from MASHZones array, remaining count: %d', #self.MASHZones))
+          break
+        end
+      end
+    end
     
     -- Send destruction message
     local msg = _fmtTemplate(CTLD.Messages.medevac_mash_destroyed, {
