@@ -361,7 +361,7 @@ CTLD.Config = {
   -- 2 = INFO      - Important state changes, initialization, cleanup (default for production)
   -- 3 = VERBOSE   - Detailed operational info (zone validation, menus, builds, MEDEVAC events)
   -- 4 = DEBUG     - Everything including hover checks, crate pickups, detailed troop spawns
-  LogLevel = 4,  -- lowered from DEBUG (4) to INFO (2) for production performance
+  LogLevel = 1,  -- lowered from DEBUG (4) to INFO (2) for production performance
   MessageDuration = 15,                  -- seconds for on-screen messages
 
   -- Debug toggles for detailed crate proximity logging (useful when tuning hover coach / ground autoload)
@@ -3460,6 +3460,7 @@ local function _clearPerUnitCachesForGroup(group)
         if CTLD._hoverState then CTLD._hoverState[uname] = nil end
         if CTLD._unitLast then CTLD._unitLast[uname] = nil end
         if CTLD._coachState then CTLD._coachState[uname] = nil end
+        if CTLD._groundLoadState then CTLD._groundLoadState[uname] = nil end
       end
     end
   end
@@ -3506,6 +3507,11 @@ function CTLD:_cleanupTransportGroup(group, groupName)
       if ok then mooseGroup = res end
     end
     if mooseGroup then _clearPerUnitCachesForGroup(mooseGroup) end
+  end
+
+  -- Cleanup JTAC registry if this group had JTAC registered
+  if self._jtacRegistry and self._jtacRegistry[gname] then
+    self:_cleanupJTACEntry(gname)
   end
 
   _logDebug(string.format('[MenuCleanup] Cleared CTLD state for group %s', gname))
@@ -5026,6 +5032,12 @@ function CTLD:New(cfg)
     local ok, err = pcall(function() o:CleanupDeployedTroops() end)
     if not ok then _logError('CleanupDeployedTroops scheduler error: '..tostring(err)) end
   end, {}, 30, 30)
+
+  -- Periodic comprehensive state maintenance (prune orphaned entries)
+  o.StateMaintSched = SCHEDULER:New(nil, function()
+    local ok, err = pcall(function() o:PruneOrphanedState() end)
+    if not ok then _logError('PruneOrphanedState scheduler error: '..tostring(err)) end
+  end, {}, 120, 120)  -- Run every 2 minutes
 
   -- Optional: auto-build FOBs inside FOB zones when crates present
   if o.Config.AutoBuildFOBInZones then
@@ -8504,10 +8516,104 @@ function CTLD:CleanupDeployedTroops()
     if troopMeta.side == self.Side then
       local troopGroup = GROUP:FindByName(troopGroupName)
       if not troopGroup or not troopGroup:IsAlive() then
+        -- Remove from spatial grid if point is available
+        if troopMeta.point then
+          _removeFromSpatialGrid(troopGroupName, troopMeta.point, 'troops')
+        end
         CTLD._deployedTroops[troopGroupName] = nil
         _logDebug('Cleaned up deployed troop group: '..troopGroupName)
       end
     end
+  end
+end
+
+-- Comprehensive state pruning to prevent memory leaks
+function CTLD:PruneOrphanedState()
+  local pruned = 0
+  
+  -- 1. Prune spatial grid entries for non-existent crates/troops
+  for gridKey, cell in pairs(CTLD._spatialGrid) do
+    -- Check crates in this cell
+    for crateName, _ in pairs(cell.crates) do
+      if not CTLD._crates[crateName] then
+        cell.crates[crateName] = nil
+        pruned = pruned + 1
+      end
+    end
+    -- Check troops in this cell
+    for troopName, _ in pairs(cell.troops) do
+      if not CTLD._deployedTroops[troopName] then
+        cell.troops[troopName] = nil
+        pruned = pruned + 1
+      end
+    end
+    -- Remove empty cells
+    if not next(cell.crates) and not next(cell.troops) then
+      CTLD._spatialGrid[gridKey] = nil
+    end
+  end
+  
+  -- 2. Prune JTAC registry for non-existent groups
+  if self._jtacRegistry then
+    for gname, _ in pairs(self._jtacRegistry) do
+      local g = Group.getByName(gname)
+      if not g or not g:isExist() then
+        self:_cleanupJTACEntry(gname)
+        pruned = pruned + 1
+      end
+    end
+  end
+  
+  -- 3. Prune hover/coach state for non-existent units
+  local function pruneUnitState(stateTbl, label)
+    if not stateTbl then return end
+    for unitName, _ in pairs(stateTbl) do
+      local u = Unit.getByName(unitName)
+      if not u or not u:isExist() or u:getLife() <= 0 then
+        stateTbl[unitName] = nil
+        pruned = pruned + 1
+      end
+    end
+  end
+  
+  pruneUnitState(CTLD._hoverState, 'hover')
+  pruneUnitState(CTLD._coachState, 'coach')
+  pruneUnitState(CTLD._groundLoadState, 'groundLoad')
+  pruneUnitState(CTLD._unitLast, 'unitLast')
+  
+  -- 4. Prune group-level state for non-existent groups
+  local function pruneGroupState(stateTbl, label)
+    if not stateTbl then return end
+    for gname, _ in pairs(stateTbl) do
+      local g = GROUP:FindByName(gname)
+      if not g or not g:IsAlive() then
+        stateTbl[gname] = nil
+        pruned = pruned + 1
+      end
+    end
+  end
+  
+  pruneGroupState(CTLD._troopsLoaded, 'troopsLoaded')
+  pruneGroupState(CTLD._loadedCrates, 'loadedCrates')
+  pruneGroupState(CTLD._loadedTroopTypes, 'loadedTroopTypes')
+  pruneGroupState(CTLD._buildConfirm, 'buildConfirm')
+  pruneGroupState(CTLD._medevacUnloadStates, 'medevacUnload')
+  pruneGroupState(CTLD._medevacLoadStates, 'medevacLoad')
+  pruneGroupState(CTLD._medevacEnrouteStates, 'medevacEnroute')
+  
+  -- 5. Prune _inStockMenus for non-existent groups
+  if CTLD._inStockMenus then
+    for gname, _ in pairs(CTLD._inStockMenus) do
+      local g = GROUP:FindByName(gname)
+      if not g or not g:IsAlive() then
+        CTLD._inStockMenus[gname] = nil
+        pruned = pruned + 1
+      end
+    end
+  end
+  
+  if pruned > 0 then
+    _logVerbose(string.format('[StateMaint] Pruned %d orphaned state entries', pruned))
   end
 end
 -- #endregion Crates
