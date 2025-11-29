@@ -182,13 +182,13 @@ CTLD.Messages = {
   
   -- FARP System messages
   farp_upgrade_started = "Upgrading FOB to FARP Stage {stage}... Building in progress.",
-  farp_upgrade_complete = "{player} upgraded FOB to FARP Stage {stage}!\nFARP Services: {services}\nFOB still active for logistics and troop operations.",
+  farp_upgrade_complete = "{player} upgraded FOB to FARP Stage {stage}! Services available: {services}",
   farp_upgrade_insufficient_salvage = "Insufficient salvage to upgrade to FARP Stage {stage}. Need {need} points (have {current}). Deliver crews to MASH or sling-load salvage!",
-  farp_status = "FOB + FARP Status: Stage {stage}/{max_stage}\nFARP Services: {services}\nFOB logistics: ACTIVE\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
-  farp_status_maxed = "FOB + FARP Status: Stage {stage}/{max_stage} (FULLY UPGRADED)\nFARP Services: {services}\nFOB logistics: ACTIVE",
+  farp_status = "FOB Status: FARP Stage {stage}/{max_stage}\nServices: {services}\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
+  farp_status_maxed = "FOB Status: FARP Stage {stage}/{max_stage} (FULLY UPGRADED)\nServices: {services}",
   farp_not_at_fob = "You must be near a FOB Pickup Zone to upgrade it to a FARP.",
   farp_already_maxed = "This FOB is already at maximum FARP stage (Stage 3).",
-  farp_service_available = "FARP services available: Rearm, Refuel, Repair for ground vehicles and helicopters within {radius}m. FOB logistics remain active.",
+  farp_service_available = "FARP services available: Rearm, Refuel, Repair for ground vehicles and helicopters within {radius}m.",
   slingload_salvage_warn_5min = "SALVAGE URGENT: Crate {id} at {grid} expires in 5 minutes!",
   slingload_salvage_hooked_in_zone = "Salvage crate {id} is inside {zone}. Release the sling to complete delivery.",
   slingload_salvage_wrong_zone = "Salvage crate {id} is sitting in {zone_type} zone {zone}. Take it to an active Salvage zone for credit.",
@@ -361,7 +361,7 @@ CTLD.Config = {
   -- 2 = INFO      - Important state changes, initialization, cleanup (default for production)
   -- 3 = VERBOSE   - Detailed operational info (zone validation, menus, builds, MEDEVAC events)
   -- 4 = DEBUG     - Everything including hover checks, crate pickups, detailed troop spawns
-  LogLevel = 1,  -- lowered from DEBUG (4) to INFO (2) for production performance
+  LogLevel = 4,  -- lowered from DEBUG (4) to INFO (2) for production performance
   MessageDuration = 15,                  -- seconds for on-screen messages
 
   -- Debug toggles for detailed crate proximity logging (useful when tuning hover coach / ground autoload)
@@ -621,8 +621,8 @@ CTLD.Config = {
     
     -- Spawn probability when enemy ground units die
     SpawnChance = {
-      [coalition.side.BLUE] = 0.10, -- 20% chance when BLUE unit dies (RED can collect the salvage)
-      [coalition.side.RED] = 0.10,  -- 20% chance when RED unit dies (BLUE can collect the salvage)
+      [coalition.side.BLUE] = 0.20, -- 20% chance when BLUE unit dies (RED can collect the salvage)
+      [coalition.side.RED] = 0.20,  -- 20% chance when RED unit dies (BLUE can collect the salvage)
     },
     
     -- Weight classes with spawn probabilities and reward rates
@@ -713,76 +713,134 @@ CTLD.FARPConfig = {
   -- Format: { type = "DCS_Static_Name", x = offset_x, z = offset_z, heading = degrees, height = 0 }
   -- Positions are relative to FOB center point
   StageLayouts = {
-    -- Stage 1: Basic FARP Pad (3 salvage) - Inner ring 30-60m
+    -- Stage 1: Basic FARP Pad (3 salvage)
     [1] = {
-      { type = "FARP CP Blindage", x = 0, z = 40, heading = 0 },
-      { type = "FARP Tent", x = 45, z = 20, heading = 30 },
-      { type = "FARP Tent", x = -45, z = 20, heading = 330 },
-      { type = "container_20ft", x = 35, z = -30, heading = 338 },
-      { type = "container_20ft", x = -35, z = -30, heading = 202 },
-      { type = "Windsock", x = 0, z = 60, heading = 0 },
-      { type = "FARP Ammo Dump Coating", x = 30, z = -25, heading = 219 },
-      { type = "FARP Ammo Dump Coating", x = -30, z = -25, heading = 141 },
-      { type = "FARP Fuel Depot", x = 40, z = 30, heading = 30 },
-      { type = "FARP Fuel Depot", x = -40, z = 30, heading = 330 },
-      { type = "GeneratorF", x = 50, z = -10, heading = 278 },
-      { type = "container_20ft", x = -50, z = -10, heading = 98 },
+      { type = "FARP CP Blindage", x = 0, z = 25, heading = 180 },
+      { type = "FARP Tent", x = 17.3, z = 10, heading = 240 },
+      { type = "FARP Tent", x = -17.3, z = 10, heading = 120 },
+      { type = "container_20ft", x = 15.4, z = -6.2, heading = 90 },
+      { type = "container_20ft", x = -15.4, z = -6.2, heading = 90 },
+      { type = "Windsock", x = 0, z = 30, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 13, z = -10.6, heading = 30 },
+      { type = "FARP Ammo Dump Coating", x = -13, z = -10.6, heading = 330 },
+      { type = ".Ammunition depot", x = 17, z = 12, heading = 0 },
+      { type = ".Ammunition depot", x = -17, z = 12, heading = 0 },
+      { type = "BarrelCargo", x = 8, z = -18, heading = 0 },
+      { type = "BarrelCargo", x = -8, z = -18, heading = 0 },
+      { type = "BarrelCargo", x = 12, z = 20, heading = 0 },
+      { type = "BarrelCargo", x = -12, z = 20, heading = 0 },
+      { type = "GeneratorF", x = 22, z = -3, heading = 270 },
+      { type = "Sandbox", x = 10, z = -16, heading = 0 },
+      { type = "Sandbox", x = -10, z = -16, heading = 0 },
+      { type = "Sandbox", x = 10, z = 16, heading = 0 },
+      { type = "Sandbox", x = -10, z = 16, heading = 0 },
+      { type = "Sandbox", x = 18, z = 0, heading = 0 },
+      { type = "Sandbox", x = -18, z = 0, heading = 0 },
     },
     
-    -- Stage 2: Operational FARP - adds fuel capability (5 more salvage) - Middle ring 80-130m
+    -- Stage 2: Operational FARP - adds fuel capability (5 more salvage)
     [2] = {
-      { type = "M978 HEMTT Tanker", x = 90, z = 0, heading = 270 },
-      { type = "M978 HEMTT Tanker", x = -90, z = 0, heading = 90 },
-      { type = "FARP Fuel Depot", x = 95, z = -40, heading = 281 },
-      { type = "FARP Fuel Depot", x = -95, z = -40, heading = 79 },
-      { type = "FARP Tent", x = 80, z = 60, heading = 39 },
-      { type = "FARP Tent", x = -80, z = 60, heading = 321 },
-      { type = "container_40ft", x = 0, z = -100, heading = 180 },
-      { type = "container_40ft", x = 50, z = -100, heading = 180 },
-      { type = "FARP Ammo Dump Coating", x = 85, z = 70, heading = 30 },
-      { type = "FARP Ammo Dump Coating", x = -85, z = 70, heading = 330 },
-      { type = "Ural-375 PBU", x = 105, z = -30, heading = 247 },
-      { type = "Electric power box", x = 90, z = 50, heading = 36 },
-      { type = "Electric power box", x = -90, z = 50, heading = 324 },
-      { type = "GeneratorF", x = 0, z = -85, heading = 180 },
-    },
-    
-    -- Stage 3: Full Forward Airbase - adds ammo and comms (8 more salvage) - Outer ring 150-250m
-    [3] = {
-      { type = "FARP", x = 0, z = 0, heading = 0 },
-      -- Service objects near pad for scripted services
       { type = "M978 HEMTT Tanker", x = 35, z = 0, heading = 270 },
       { type = "M978 HEMTT Tanker", x = -35, z = 0, heading = 90 },
-      { type = "FARP Fuel Depot", x = 30, z = 25, heading = 315 },
-      { type = "FARP Fuel Depot", x = -30, z = 25, heading = 45 },
-      { type = "FARP Ammo Dump Coating", x = 40, z = -20, heading = 282 },
-      { type = "FARP Ammo Dump Coating", x = -40, z = -20, heading = 78 },
-      -- Extended support structures at outer ring
-      { type = "FARP CP Blindage", x = 0, z = 150, heading = 0 },
-      { type = "Shelter", x = 0, z = -160, heading = 180 },
-      { type = "SKP-11", x = 0, z = 180, heading = 0 },
-      { type = "ZiL-131 APA-80", x = 50, z = 165, heading = 8 },
-      { type = "FARP Tent", x = 170, z = 0, heading = 270 },
-      { type = "FARP Tent", x = -170, z = 0, heading = 90 },
-      { type = "FARP Tent", x = 120, z = 120, heading = 315 },
-      { type = "FARP Tent", x = -120, z = 120, heading = 45 },
-      { type = "FARP Ammo Dump Coating", x = 160, z = 80, heading = 30 },
-      { type = "FARP Ammo Dump Coating", x = -160, z = 80, heading = 330 },
-      { type = "container_20ft", x = -140, z = -130, heading = 128 },
-      { type = "container_20ft", x = -150, z = -120, heading = 133 },
-      { type = "container_20ft", x = 140, z = -130, heading = 52 },
-      { type = "container_20ft", x = 150, z = -120, heading = 47 },
-      { type = "GeneratorF", x = 155, z = -140, heading = 234 },
-      { type = "GeneratorF", x = -155, z = -140, heading = 126 },
-      { type = "UAZ-469", x = 70, z = 160, heading = 14 },
-      { type = "UAZ-469", x = -70, z = 160, heading = 346 },
-      { type = "Ural-375", x = -125, z = -135, heading = 125 },
-      { type = "Sandbox", x = 350, z = 0, heading = 270 },
-      { type = "Sandbox", x = -350, z = 0, heading = 90 },
-      { type = "Sandbox", x = 247, z = 247, heading = 315 },
-      { type = "Sandbox", x = -247, z = 247, heading = 45 },
-      { type = "Sandbox", x = 247, z = -247, heading = 225 },
-      { type = "Sandbox", x = -247, z = -247, heading = 135 },
+      { type = "FARP Fuel Depot", x = 40, z = -8, heading = 0 },
+      { type = "FARP Fuel Depot", x = -40, z = -8, heading = 0 },
+      { type = "FARP Tent", x = 26.5, z = 21.7, heading = 210 },
+      { type = "FARP Tent", x = -26.5, z = 21.7, heading = 150 },
+      { type = "container_40ft", x = 0, z = -35, heading = 0 },
+      { type = "container_40ft", x = 8, z = -35, heading = 0 },
+      { type = "Hesco_wallperimeter_7", x = 0, z = 42, heading = 0 },
+      { type = "Hesco_wallperimeter_7", x = 30, z = 30, heading = 315 },
+      { type = "Hesco_wallperimeter_7", x = -30, z = 30, heading = 45 },
+      { type = "Red_Flag", x = 0, z = 45, heading = 0 },
+      { type = "Red_Flag", x = 45, z = 0, heading = 0 },
+      { type = "Red_Flag", x = -45, z = 0, heading = 0 },
+      { type = "Red_Flag", x = 0, z = -45, heading = 0 },
+      { type = "Ural-375 PBU", x = 32.9, z = -13.1, heading = 225 },
+      { type = "Electric power box", x = 28, z = 20, heading = 0 },
+      { type = "Electric power box", x = -28, z = 20, heading = 0 },
+      { type = "Landmine pot", x = 36, z = 8, heading = 0 },
+      { type = "Landmine pot", x = -36, z = 8, heading = 0 },
+      { type = "Landmine pot", x = 30, z = -25, heading = 0 },
+      { type = "Landmine pot", x = -30, z = -25, heading = 0 },
+      { type = "Landmine pot", x = 20, z = 30, heading = 0 },
+      { type = "Landmine pot", x = -20, z = 30, heading = 0 },
+      { type = "Tetrapod", x = 42, z = 15, heading = 0 },
+      { type = "Tetrapod", x = -42, z = 15, heading = 0 },
+      { type = "Tetrapod", x = 42, z = -15, heading = 0 },
+      { type = "Tetrapod", x = -42, z = -15, heading = 0 },
+      { type = "Tetrapod", x = 15, z = 42, heading = 0 },
+      { type = "Tetrapod", x = -15, z = 42, heading = 0 },
+      { type = "Tetrapod", x = 15, z = -42, heading = 0 },
+      { type = "Tetrapod", x = -15, z = -42, heading = 0 },
+      { type = "FARP Command Post", x = 0, z = 25, heading = 180 },
+    },
+    
+    -- Stage 3: Full Forward Airbase - adds ammo and comms (8 more salvage)
+    [3] = {
+      { type = "M939 Heavy", x = 38.9, z = -21.9, heading = 225 },
+      { type = "M939 Heavy", x = -38.9, z = -21.9, heading = 135 },
+      { type = "Shelter", x = 0, z = -50, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 48, z = -10, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = -48, z = -10, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 45, z = -20, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = -45, z = -20, heading = 0 },
+      { type = "SKP-11", x = 0, z = 55, heading = 180 },
+      { type = "ZiL-131 APA-80", x = 8, z = 52, heading = 180 },
+      { type = "Hesco_wallperimeter_1", x = 52, z = 30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = -52, z = 30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = 52, z = -30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = -52, z = -30, heading = 0 },
+      { type = "Hesco_wallperimeter_1", x = 30, z = 52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = -30, z = 52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = 30, z = -52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = -30, z = -52, heading = 90 },
+      { type = "Hesco_wallperimeter_1", x = 45, z = 40, heading = 45 },
+      { type = "Hesco_wallperimeter_1", x = -45, z = 40, heading = 315 },
+      { type = "Hesco_wallperimeter_1", x = 45, z = -40, heading = 135 },
+      { type = "Hesco_wallperimeter_1", x = -45, z = -40, heading = 225 },
+      { type = "FARP Tent", x = 52, z = 0, heading = 270 },
+      { type = "FARP Tent", x = -52, z = 0, heading = 90 },
+      { type = "FARP Tent", x = 36.8, z = 36.8, heading = 225 },
+      { type = "container_20ft", x = -30, z = -38, heading = 45 },
+      { type = "container_20ft", x = -35, z = -33, heading = 45 },
+      { type = "container_20ft", x = -25, z = -43, heading = 45 },
+      { type = "container_20ft", x = -33, z = -45, heading = 135 },
+      { type = "GeneratorF", x = 43.1, z = -31.4, heading = 225 },
+      { type = "UAZ-469", x = 12, z = 48, heading = 200 },
+      { type = "UAZ-469", x = 16, z = 50, heading = 170 },
+      { type = "Ural-375", x = -25, z = -35, heading = 45 },
+      { type = "Landmine pot", x = 50, z = 15, heading = 0 },
+      { type = "Landmine pot", x = -50, z = 15, heading = 0 },
+      { type = "Landmine pot", x = 50, z = -15, heading = 0 },
+      { type = "Landmine pot", x = -50, z = -15, heading = 0 },
+      { type = "Landmine pot", x = 15, z = 50, heading = 0 },
+      { type = "Landmine pot", x = -15, z = 50, heading = 0 },
+      { type = "Landmine pot", x = 40, z = 30, heading = 0 },
+      { type = "Landmine pot", x = -40, z = 30, heading = 0 },
+      { type = "Landmine pot", x = 30, z = -40, heading = 0 },
+      { type = "Landmine pot", x = -30, z = -40, heading = 0 },
+      { type = "Landmine pot", x = 45, z = 25, heading = 0 },
+      { type = "Landmine pot", x = -45, z = 25, heading = 0 },
+      { type = "billboard_motorized rifle troops", x = 0, z = -58, heading = 0 },
+      { type = "Sandbox", x = 38, z = -8, heading = 0 },
+      { type = "Sandbox", x = -38, z = -8, heading = 0 },
+      { type = "Sandbox", x = 38, z = 8, heading = 0 },
+      { type = "Sandbox", x = -38, z = 8, heading = 0 },
+      { type = "Black_Tyre", x = 20, z = -48, heading = 0 },
+      { type = "Black_Tyre", x = -20, z = -48, heading = 0 },
+      { type = "Black_Tyre", x = 24, z = -46, heading = 0 },
+      { type = "Black_Tyre", x = -24, z = -46, heading = 0 },
+      { type = "Black_Tyre", x = 28, z = -44, heading = 0 },
+      { type = "Black_Tyre", x = -28, z = -44, heading = 0 },
+      { type = "Black_Tyre", x = 48, z = 20, heading = 0 },
+      { type = "Black_Tyre", x = -48, z = 20, heading = 0 },
+      { type = "WatchTower", x = -38.9, z = 38.9, heading = 225 },
+      { type = "warning_board_c", x = 0, z = 48, heading = 180 },
+      { type = "warning_board_c", x = 48, z = 0, heading = 270 },
+      { type = "warning_board_c", x = -48, z = 0, heading = 90 },
+      { type = "warning_board_c", x = 35, z = -35, heading = 45 },
+      { type = "warning_board_c", x = -35, z = -35, heading = 315 },
+      { type = "warning_board_c", x = 35, z = 35, heading = 225 },
     },
   },
 }
@@ -801,8 +859,8 @@ CTLD.HoverCoachConfig = {
     arrivalDist = 1000,       -- m: start guidance "You're close…"
     closeDist = 100,          -- m: reduce speed / set AGL guidance
     precisionDist = 8,       -- m: start precision hints
-    captureHoriz = 15,         -- m: horizontal sweet spot radius
-    captureVert = 15,          -- m: vertical sweet spot tolerance around AGL window
+    captureHoriz = 10,         -- m: horizontal sweet spot radius
+    captureVert = 10,          -- m: vertical sweet spot tolerance around AGL window
     aglMin = 5,               -- m: hover window min AGL
     aglMax = 20,              -- m: hover window max AGL
     maxGS = 8/3.6,            -- m/s: 8 km/h for precision, used for errors
@@ -4126,36 +4184,6 @@ function CTLD:ClearMapDrawings()
   self._MapMarkup = { Pickup = {}, Drop = {}, FOB = {}, MASH = {}, SalvageDrop = {} }
 end
 
-function CTLD:_updateMobileMASHDrawing(mashId)
-  local data = CTLD._mashZones and CTLD._mashZones[mashId]
-  if not data or data.side ~= self.Side or not data.isMobile then return end
-  if not (self.Config.MapDraw and self.Config.MapDraw.Enabled and self.Config.MapDraw.DrawMASHZones) then return end
-  
-  local zoneName = data.displayName or mashId
-  if self._ZoneActive.MASH[zoneName] == false then return end
-  
-  -- Remove old drawing
-  self:_removeZoneDrawing('MASH', zoneName)
-  
-  -- Redraw at new position
-  local md = self.Config.MapDraw
-  local opts = {
-    OutlineColor = md.OutlineColor,
-    LineType = (md.LineTypes and md.LineTypes.MASH) or md.LineType or 1,
-    FillColor = (md.FillColors and md.FillColors.MASH) or nil,
-    FontSize = md.FontSize,
-    ReadOnly = (md.ReadOnly ~= false),
-    LabelPrefix = (md.LabelPrefixes and md.LabelPrefixes.MASH) or 'MASH',
-    LabelOffsetX = md.LabelOffsetX,
-    LabelOffsetFromEdge = md.LabelOffsetFromEdge,
-    LabelOffsetRatio = md.LabelOffsetRatio,
-    ForAll = (md.ForAll == true),
-  }
-  if data.zone then
-    self:_drawZoneCircleAndLabel('MASH', data.zone, opts)
-  end
-end
-
 function CTLD:_removeZoneDrawing(kind, zname)
   if not (self._MapMarkup and self._MapMarkup[kind] and self._MapMarkup[kind][zname]) then return end
   local ids = self._MapMarkup[kind][zname]
@@ -4282,14 +4310,13 @@ function CTLD:DrawZonesOnMap()
                 local v2 = (VECTOR2 and VECTOR2.New) and VECTOR2:New(pos.x, pos.z) or { x = pos.x, y = pos.z }
                 zoneObj = ZONE_RADIUS:New(zoneName, v2, data.radius or 500)
               else
-                -- Create zone that references data.position directly for live updates
+                local posCopy = { x = pos.x, z = pos.z }
                 zoneObj = {}
                 function zoneObj:GetName()
                   return zoneName
                 end
                 function zoneObj:GetPointVec3()
-                  local currentPos = data.position or { x = 0, z = 0 }
-                  return { x = currentPos.x, y = 0, z = currentPos.z }
+                  return { x = posCopy.x, y = 0, z = posCopy.z }
                 end
                 function zoneObj:GetRadius()
                   return data.radius or 500
@@ -7152,10 +7179,9 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
         counts[reqKey] = (counts[reqKey] or 0) - (qty or 0)
       end
       _eventSend(self, nil, self.Side, 'build_success_coalition', { build = def.description or recipeKey, player = _playerNameFromGroup(group) })
-      _logInfo(string.format('[BUILD_DEBUG] Built key=%s desc=%s isFOB=%s isMobileMASH=%s', tostring(recipeKey), tostring(def.description), tostring(def.isFOB), tostring(def.isMobileMASH)))
       if def.isFOB then pcall(function() self:_CreateFOBPickupZone({ x = spawnAt.x, z = spawnAt.z }, def, hdg) end) end
       if def.isMobileMASH then
-        _logInfo(string.format('[MobileMASH] BuildSpecificAtGroup invoking _CreateMobileMASH for key %s at (%.1f, %.1f)', tostring(recipeKey), spawnAt.x or -1, spawnAt.z or -1))
+        _logDebug(string.format('[MobileMASH] BuildSpecificAtGroup invoking _CreateMobileMASH for key %s at (%.1f, %.1f)', tostring(recipeKey), spawnAt.x or -1, spawnAt.z or -1))
         local ok, err = pcall(function() self:_CreateMobileMASH(g, { x = spawnAt.x, z = spawnAt.z }, def) end)
         if not ok then
           _logError(string.format('[MobileMASH] _CreateMobileMASH invocation failed: %s', tostring(err)))
@@ -8759,14 +8785,6 @@ function CTLD:BuildAtGroup(group, opts)
                   self:_CreateFOBPickupZone({ x = actualSpawn.x, z = actualSpawn.z }, cat, hdg)
                 end)
               end
-              -- If this was a Mobile MASH, create the tracking zone
-              if cat.isMobileMASH then
-                _logInfo(string.format('[MobileMASH] BuildAtGroup invoking _CreateMobileMASH for key %s at (%.1f, %.1f)', tostring(recipeKey), actualSpawn.x or -1, actualSpawn.z or -1))
-                local ok, err = pcall(function() self:_CreateMobileMASH(g, { x = actualSpawn.x, z = actualSpawn.z }, cat) end)
-                if not ok then
-                  _logError(string.format('[MobileMASH] _CreateMobileMASH invocation failed: %s', tostring(err)))
-                end
-              end
               -- Assign optional behavior for built vehicles/groups
               local behavior = opts and opts.behavior or nil
               if behavior == 'attack' and self.Config.AttackAI and self.Config.AttackAI.Enabled then
@@ -9672,27 +9690,7 @@ function CTLD:ScanGroundAutoLoad()
               if groundCfg.RequirePickupZone then
                 local inPickupZone = self:_isUnitInsidePickupZone(unit, true)
                 
-                -- Explicitly exclude FARP service zones from auto-load
-                local inFARPZone = false
-                local unitPoint = unit:GetPointVec3()
-                for farpZoneName, farpInfo in pairs(CTLD._farpZones or {}) do
-                  local farpZone = farpInfo.zone
-                  if farpZone then
-                    local farpPoint = farpZone:GetPointVec3()
-                    local dx = (farpPoint.x - unitPoint.x)
-                    local dz = (farpPoint.z - unitPoint.z)
-                    local d = math.sqrt(dx*dx + dz*dz)
-                    local farpRadius = self:_getZoneRadius(farpZone)
-                    if d <= farpRadius then
-                      inFARPZone = true
-                      break
-                    end
-                  end
-                end
-                
-                if inFARPZone then
-                  inValidZone = false -- Never auto-load in FARP zones
-                elseif not inPickupZone and groundCfg.AllowInFOBZones then
+                if not inPickupZone and groundCfg.AllowInFOBZones then
                   -- Check FOB zones too
                   for _, fobZone in ipairs(self.FOBZones or {}) do
                     local fname = fobZone:GetName()
@@ -10702,20 +10700,20 @@ function CTLD:FindNearestFOBZone(point)
 end
 
 -- Spawn static objects for a FARP stage
-function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
+function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalition)
   if not (CTLD.FARPConfig and CTLD.FARPConfig.StageLayouts[stage]) then
     _logError(string.format('Invalid FARP stage %d or missing layout config', stage))
     return false
   end
   
   local layout = CTLD.FARPConfig.StageLayouts[stage]
-  local farpData = CTLD._farpData[zoneName] or { stage = 0, statics = {}, coalition = coalitionId }
+  local farpData = CTLD._farpData[zoneName] or { stage = 0, statics = {}, coalition = coalition }
   
-  _logInfo(string.format('Spawning FARP Stage %d statics for zone %s (coalition %d)', stage, zoneName, coalitionId))
+  _logInfo(string.format('Spawning FARP Stage %d statics for zone %s (coalition %d)', stage, zoneName, coalition))
   
   -- Get coalition name for DCS
-  -- Note: 'coalitionId' parameter is a number (1=red, 2=blue), not the coalition table
-  local coalitionName = (coalitionId == 2) and 'blue' or 'red'
+  -- Note: 'coalition' parameter is a number (1=red, 2=blue), not the coalition table
+  local coalitionName = (coalition == 2) and 'blue' or 'red'
   
   for _, obj in ipairs(layout) do
     -- Calculate world position from relative offset
@@ -10726,20 +10724,6 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
     -- Generate unique name
     local staticName = string.format('FARP_%s_S%d_%s_%d', zoneName, stage, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
     
-    -- Determine category and shape_name based on object type
-    local category = "Fortifications"
-    local shapeName = ""
-    local linkUnit = nil
-    local linkOffset = false
-    local callsignID = math.random(1, 99)
-    
-    if obj.type == "FARP" then
-      category = "Heliports"
-      shapeName = "FARP"
-      linkUnit = 0
-      linkOffset = true
-    end
-    
     -- Create static object data
     local staticData = {
       ["type"] = obj.type,
@@ -10747,24 +10731,15 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
       ["heading"] = math.rad(obj.heading or 0),
       ["x"] = worldX,
       ["y"] = worldZ,
-      ["category"] = category,
+      ["category"] = "Fortifications",
       ["canCargo"] = false,
-      ["shape_name"] = shapeName,
+      ["shape_name"] = "",
       ["rate"] = 100,
     }
     
-    -- Add FARP-specific data
-    if obj.type == "FARP" then
-      staticData["linkUnit"] = linkUnit
-      staticData["linkOffset"] = linkOffset
-      staticData["callsign_id"] = callsignID
-      staticData["frequencyList"] = {127.5, 129.5, 121.5}
-      staticData["modulation"] = 0
-    end
-    
     -- Spawn the static
     local success, staticObj = pcall(function()
-      return coalition.addStaticObject(coalitionId, staticData)
+      return coalition.addStaticObject(coalition, staticData)
     end)
     
     if success and staticObj then
@@ -10776,7 +10751,7 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
   end
   
   farpData.stage = stage
-  farpData.coalition = coalitionId
+  farpData.coalition = coalition
   CTLD._farpData[zoneName] = farpData
   
   _logInfo(string.format('FARP Stage %d complete for zone %s - spawned %d statics', stage, zoneName, #farpData.statics))
@@ -10833,8 +10808,7 @@ function CTLD:UpgradeFARP(group, zoneName)
   end
   
   local center = zone:GetVec2()
-  -- Offset FARP 80m north from FOB zone center to avoid spawned trucks
-  local centerPoint = { x = center.x, z = center.y + 80 }
+  local centerPoint = { x = center.x, z = center.y }
   
   -- Deduct salvage
   CTLD._salvagePoints[self.Side] = currentSalvage - upgradeCost
@@ -10860,7 +10834,7 @@ function CTLD:UpgradeFARP(group, zoneName)
       services = table.concat(services, ', ')
     })
     
-    -- Create or update FARP service zone (use same offset centerPoint)
+    -- Create or update FARP service zone
     self:CreateFARPServiceZone(zoneName, centerPoint, nextStage)
     
     _logInfo(string.format('%s upgraded FOB %s to FARP Stage %d (cost: %d salvage)', 
@@ -10883,13 +10857,6 @@ function CTLD:CreateFARPServiceZone(zoneName, centerPoint, stage)
   local v2 = (VECTOR2 and VECTOR2.New) and VECTOR2:New(centerPoint.x, centerPoint.z) or { x = centerPoint.x, y = centerPoint.z }
   local serviceZone = ZONE_RADIUS:New(farpZoneName, v2, radius)
   
-  -- Enable scanning for the zone (scan for units and helicopters)
-  if serviceZone.Scan then
-    pcall(function()
-      serviceZone:Scan({Object.Category.UNIT, Object.Category.STATIC})
-    end)
-  end
-  
   CTLD._farpZones[farpZoneName] = {
     zone = serviceZone,
     side = self.Side,
@@ -10909,115 +10876,56 @@ function CTLD:StartFARPServices(farpZoneName)
   if not farpInfo then return end
   
   local selfref = self
-  CTLD._farpServiceState = CTLD._farpServiceState or {}
   
-  -- Service scheduler runs every 2 seconds
+  -- Service scheduler runs every 5 seconds
   SCHEDULER:New(nil, function()
     local zone = farpInfo.zone
     if not zone then return end
     
     local stage = farpInfo.stage
-    local now = timer.getTime()
+    local units = zone:GetScannedUnits()
     
-    -- Scan zone for units
-    local zoneVec3 = zone:GetPointVec3()
-    local radius = selfref:_getZoneRadius(zone)
-    local volS = {
-      id = world.VolumeType.SPHERE,
-      params = {
-        point = zoneVec3,
-        radius = radius
-      }
-    }
-    
-    local foundUnits = {}
-    world.searchObjects(Object.Category.UNIT, volS, function(obj)
-      local unit = UNIT:Find(obj)
+    for _, unit in ipairs(units or {}) do
       if unit and unit:IsAlive() then
         local unitCoalition = unit:GetCoalition()
+        
         -- Only service friendly units
         if unitCoalition == farpInfo.side then
-          if unit:IsAir() or unit:IsGround() then
-            table.insert(foundUnits, unit)
-          end
-        end
-      end
-      return true
-    end)
-    
-    for _, unit in ipairs(foundUnits) do
-      local dcsUnit = unit:GetDCSObject()
-      if dcsUnit then
-        local uname = unit:GetName()
-        local agl = unit:GetAltitude() - land.getHeight(unit:GetPointVec2())
-        local vel = unit:GetVelocityKMH()
-        
-        -- Check if aircraft is on ground (low AGL and low speed)
-        local onGround = (agl < 5) and (vel < 5)
-        
-        if onGround then
-          CTLD._farpServiceState[uname] = CTLD._farpServiceState[uname] or { lastService = 0 }
-          local state = CTLD._farpServiceState[uname]
+          local unitType = unit:GetTypeName()
+          local group = unit:GetGroup()
           
-          -- Service every 3 seconds to avoid spam
-          if (now - state.lastService) >= 3 then
-            local serviced = false
-            
+          -- Service helicopters and ground vehicles
+          if group and (unit:IsHelicopter() or unit:IsGround()) then
             -- Stage 2+: Refuel
             if stage >= 2 then
-              local fuel = dcsUnit:getFuel()
-              if fuel < 0.95 then
-                -- Add 10% fuel per service tick (takes ~30 seconds for full refuel)
-                dcsUnit:setFuel(math.min(1.0, fuel + 0.10))
-                serviced = true
-              end
-            end
-            
-            -- Stage 3: Rearm
-            if stage >= 3 then
+              -- Trigger refuel (DCS built-in command)
               pcall(function()
-                -- Rearm all pylons to full
-                local ammo = dcsUnit:getAmmo()
-                if ammo then
-                  for _, wpn in ipairs(ammo) do
-                    if wpn.count then
-                      -- Set to full ammo (this is a workaround - DCS has limited rearm API)
-                      dcsUnit:setAmmo(wpn.type_name, wpn.count + 100)
-                    end
-                  end
-                  serviced = true
+                local controller = unit:GetUnit():getController()
+                if controller then
+                  controller:setCommand({
+                    id = 'RefuelInFlight',
+                    params = {}
+                  })
                 end
               end)
-              
-              -- Repair (restore hit points)
-              local life = dcsUnit:getLife()
-              local life0 = dcsUnit:getLife0()
-              if life and life0 and life < life0 then
-                -- Repair 20% per tick (takes ~15 seconds for full repair)
-                dcsUnit:setLife(math.min(life0, life + (life0 * 0.20)))
-                serviced = true
-              end
             end
             
-            if serviced then
-              state.lastService = now
-              local gname = unit:GetGroup():GetName()
-              if stage >= 3 then
-                MESSAGE:New(string.format('FARP: Servicing %s (Refuel/Rearm/Repair)', unit:GetTypeName()), 5):ToGroup(GROUP:FindByName(gname))
-              else
-                MESSAGE:New(string.format('FARP: Refueling %s', unit:GetTypeName()), 5):ToGroup(GROUP:FindByName(gname))
-              end
+            -- Stage 3: Rearm and Repair
+            if stage >= 3 then
+              pcall(function()
+                local dcsUnit = unit:GetUnit()
+                if dcsUnit then
+                  -- Note: DCS doesn't have direct Lua API for ground rearm/repair
+                  -- This simulates the presence of the service zone
+                  -- In practice, DCS may auto-service units near FARP statics
+                end
+              end)
             end
-          end
-        else
-          -- Aircraft not on ground, reset service timer
-          if CTLD._farpServiceState[uname] then
-            CTLD._farpServiceState[uname].lastService = 0
           end
         end
       end
     end
-  end, {}, 0, 2) -- Start immediately, repeat every 2 seconds
+  end, {}, 0, 5) -- Start immediately, repeat every 5 seconds
   
   _logDebug(string.format('FARP service scheduler started for %s', farpZoneName))
 end
@@ -11213,12 +11121,7 @@ function CTLD:InitMEDEVAC()
   
   -- Initialize salvage pools
   if CTLD.MEDEVAC.Salvage and CTLD.MEDEVAC.Salvage.Enabled then
-    local before = CTLD._salvagePoints[self.Side]
-    -- Check instance config for InitialSalvage override
-    local initialValue = (self.Config.MEDEVAC and self.Config.MEDEVAC.InitialSalvage) or 0
-    CTLD._salvagePoints[self.Side] = CTLD._salvagePoints[self.Side] or initialValue
-    local after = CTLD._salvagePoints[self.Side]
-    env.info(string.format('[InitMEDEVAC] Side=%s Salvage BEFORE=%s InitialValue=%s AFTER=%s', tostring(self.Side), tostring(before), tostring(initialValue), tostring(after)))
+    CTLD._salvagePoints[self.Side] = CTLD._salvagePoints[self.Side] or 0
   end
   
   -- Setup event handler for unit deaths
@@ -13371,7 +13274,6 @@ function CTLD:ShowSalvagePoints(group)
   end
   
   local salvage = CTLD._salvagePoints[self.Side] or 0
-  env.info('ShowSalvagePoints: self.Side = ' .. tostring(self.Side) .. ', CTLD._salvagePoints[self.Side] = ' .. tostring(CTLD._salvagePoints and CTLD._salvagePoints[self.Side] or 'nil') .. ', salvage = ' .. tostring(salvage))
   
   local lines = {}
   table.insert(lines, '=== Coalition Salvage Points ===')
@@ -13747,19 +13649,18 @@ end
 
 -- Create a Mobile MASH zone and start announcements
 function CTLD:_CreateMobileMASH(group, position, catalogDef)
-  _logInfo('[MobileMASH] _CreateMobileMASH called')
-  local cfg = self.Config.MEDEVAC
+  local cfg = CTLD.MEDEVAC
   if not cfg or not cfg.Enabled then
-    _logInfo('[MobileMASH] Config missing or MEDEVAC disabled; aborting mobile deployment')
+    _logDebug('[MobileMASH] Config missing or MEDEVAC disabled; aborting mobile deployment')
     return
   end
   if not cfg.MobileMASH or not cfg.MobileMASH.Enabled then
-    _logInfo('[MobileMASH] MobileMASH feature disabled in config; aborting')
+    _logDebug('[MobileMASH] MobileMASH feature disabled in config; aborting')
     return
   end
 
   if not position or not position.x or not position.z then
-    _logInfo('[MobileMASH] Missing build position; aborting Mobile MASH deployment')
+    _logError('[MobileMASH] Missing build position; aborting Mobile MASH deployment')
     return
   end
 
@@ -13768,7 +13669,7 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     local okPreview, namePreview = pcall(function() return group:getName() end)
     if okPreview and namePreview and namePreview ~= '' then groupNamePreview = namePreview end
   end
-  _logInfo(string.format('[MobileMASH] Build requested for group %s at (%.1f, %.1f)', groupNamePreview, position.x or 0, position.z or 0))
+  _logVerbose(string.format('[MobileMASH] Build requested for group %s at (%.1f, %.1f)', groupNamePreview, position.x or 0, position.z or 0))
 
   local function safeGetName(g)
     if not g then return nil end
@@ -13788,12 +13689,12 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     _logError('[MobileMASH] Unable to determine coalition side; aborting Mobile MASH deployment')
     return
   end
-  _logInfo(string.format('[MobileMASH] Using coalition side %s (%s)', tostring(side), tostring(catalogDef.side or self.Side)))
+  _logDebug(string.format('[MobileMASH] Using coalition side %s (%s)', tostring(side), tostring(catalogDef.side or self.Side)))
 
   CTLD._mobileMASHCounter = CTLD._mobileMASHCounter or { [coalition.side.BLUE] = 0, [coalition.side.RED] = 0 }
   CTLD._mobileMASHCounter[side] = (CTLD._mobileMASHCounter[side] or 0) + 1
   local index = CTLD._mobileMASHCounter[side]
-  _logInfo(string.format('[MobileMASH] Assigned deployment index %d for side %s', index, tostring(side)))
+  _logDebug(string.format('[MobileMASH] Assigned deployment index %d for side %s', index, tostring(side)))
 
   local mashId = string.format('MOBILE_MASH_%d_%d', side, index)
   local displayName
@@ -13802,13 +13703,13 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
   else
     displayName = string.format('Mobile MASH %d', index)
   end
-  _logInfo(string.format('[MobileMASH] mashId=%s displayName=%s recipeDesc=%s', mashId, tostring(displayName), tostring(catalogDef.description)))
+  _logDebug(string.format('[MobileMASH] mashId=%s displayName=%s recipeDesc=%s', mashId, tostring(displayName), tostring(catalogDef.description)))
 
   local initialPos = { x = position.x, z = position.z }
   local radius = cfg.MobileMASH.ZoneRadius or 500
   local beaconFreq = cfg.MobileMASH.BeaconFrequency or '30.0 FM'
   local mashGroupName = safeGetName(group)
-  _logInfo(string.format('[MobileMASH] Initial position (%.1f, %.1f) radius %.1f freq %s groupName=%s', initialPos.x or 0, initialPos.z or 0, radius, tostring(beaconFreq), tostring(mashGroupName)))
+  _logDebug(string.format('[MobileMASH] Initial position (%.1f, %.1f) radius %.1f freq %s groupName=%s', initialPos.x or 0, initialPos.z or 0, radius, tostring(beaconFreq), tostring(mashGroupName)))
 
   local function buildZoneObject(name, r, pos)
     if ZONE_RADIUS and VECTOR2 and VECTOR2.New then
@@ -13951,7 +13852,7 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     }
 
     CTLD._mashZones[mashId] = mashData
-    _logInfo(string.format('[MobileMASH] Registered mashId=%s displayName=%s zoneRadius=%.1f freq=%s', mashId, displayName, radius, tostring(beaconFreq)))
+    _logDebug(string.format('[MobileMASH] Registered mashId=%s displayName=%s zoneRadius=%.1f freq=%s', mashId, displayName, radius, tostring(beaconFreq)))
 
     self._ZoneDefs = self._ZoneDefs or { PickupZones = {}, DropZones = {}, FOBZones = {}, MASHZones = {} }
     self._ZoneDefs.MASHZones = self._ZoneDefs.MASHZones or {}
@@ -13964,31 +13865,39 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     -- Add zone to MASHZones array so it's recognized by the system
     self.MASHZones = self.MASHZones or {}
     table.insert(self.MASHZones, zoneObj)
-    _logInfo(string.format('[MobileMASH] Added zone to MASHZones array, total count: %d', #self.MASHZones))
+    _logDebug(string.format('[MobileMASH] Added zone to MASHZones array, total count: %d', #self.MASHZones))
 
     -- Add to MEDEVAC zones if MEDEVAC is active
-    if self.MEDEVAC and self.MEDEVAC.AddZone then
-      local ok, err = pcall(function()
-        self.MEDEVAC:AddZone(displayName, zoneObj)
-      end)
-      if ok then
-        _logInfo(string.format('[MobileMASH] Added zone to MEDEVAC system: %s', displayName))
-        -- Refresh MEDEVAC menu to include the new zone
-        pcall(function() self.MEDEVAC:__Start(1) end)
-      else
-        _logDebug(string.format('[MobileMASH] Could not add to MEDEVAC system: %s', tostring(err)))
-      end
+    if self.MEDEVAC then
+      self.MEDEVAC:AddZone(displayName, zoneObj)
+      _logInfo(string.format('[MobileMASH] Added zone to MEDEVAC system: %s', displayName))
+      -- Refresh MEDEVAC menu to include the new zone
+      self.MEDEVAC:__Start(1)
     end
 
-    -- Auto-draw the new zone on the map using the update function
-    -- This ensures the drawing is tracked properly and can be updated/removed later
     local md = self.Config and self.Config.MapDraw or {}
-    if md.Enabled and md.DrawMASHZones then
-      _logInfo('[MobileMASH] Drawing new Mobile MASH zone on map')
-      local ok, err = pcall(function() self:_updateMobileMASHDrawing(mashId) end)
+    if md.Enabled then
+      local ok, err = pcall(function() self:DrawZonesOnMap() end)
       if not ok then
-        _logError(string.format('_updateMobileMASHDrawing failed after Mobile MASH creation: %s', tostring(err)))
+        _logError(string.format('DrawZonesOnMap failed after Mobile MASH creation: %s', tostring(err)))
       end
+    else
+      local circleId = _nextMarkupId()
+      local textId = _nextMarkupId()
+      local p = { x = initialPos.x, y = 0, z = initialPos.z }
+
+      local colors = cfg.MASHZoneColors or {}
+      local borderColor = colors.border or {1, 1, 0, 0.85}
+      local fillColor = colors.fill or {1, 0.75, 0.8, 0.25}
+
+      trigger.action.circleToCoalition(side, circleId, p, radius, borderColor, fillColor, 1, true, "")
+
+      local textPos = { x = p.x, y = 0, z = p.z - radius - 50 }
+      trigger.action.textToCoalition(side, textId, textPos, {1,1,1,0.9}, {0,0,0,0}, 18, true, displayName)
+
+      mashData.circleId = circleId
+      mashData.textId = textId
+      _logDebug(string.format('[MobileMASH] Drawn map circleId=%d textId=%d', circleId, textId))
     end
 
     local gridStr = self:_GetMGRSString(initialPos)
@@ -14037,9 +13946,7 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
     -- Create a separate frequent position update scheduler for mobile MASH tracking
     -- This ensures the zone follows the vehicle even if announcements are infrequent
     local ctldInstance = self
-    local positionUpdateInterval = 15  -- Update position every 15 seconds
-    local mapRedrawInterval = 15  -- Redraw map every 15 seconds
-    local updatesSinceRedraw = 0
+    local positionUpdateInterval = 5  -- Update position every 5 seconds
     local posScheduler = SCHEDULER:New(nil, function()
       local ok, err = pcall(function()
         if not groupIsAlive() then
@@ -14058,20 +13965,13 @@ function CTLD:_CreateMobileMASH(group, position, catalogDef)
             end
           end
           _logDebug(string.format('[MobileMASH] Position updated for %s at (%.1f, %.1f)', displayName, vec3.x, vec3.z))
-          
-          -- Redraw map only every 120 seconds
-          updatesSinceRedraw = updatesSinceRedraw + positionUpdateInterval
-          if updatesSinceRedraw >= mapRedrawInterval then
-            pcall(function() ctldInstance:_updateMobileMASHDrawing(mashId) end)
-            updatesSinceRedraw = 0
-          end
         end
       end)
       if not ok then _logError('Mobile MASH position update scheduler error: '..tostring(err)) end
     end, {}, positionUpdateInterval, positionUpdateInterval)
 
     mashData.positionScheduler = posScheduler
-    _logDebug(string.format('[MobileMASH] Position update scheduler started every %ds (map redraw every %ds)', positionUpdateInterval, mapRedrawInterval))
+    _logDebug(string.format('[MobileMASH] Position update scheduler started every %ds', positionUpdateInterval))
 
     if EVENTHANDLER then
       local ctldInstance = self
@@ -14139,12 +14039,6 @@ function CTLD:_RemoveMobileMASH(mashId)
           break
         end
       end
-    end
-    
-    -- Remove from MEDEVAC system if possible
-    if self.MEDEVAC and self.MEDEVAC.RemoveZone then
-      pcall(function() self.MEDEVAC:RemoveZone(name) end)
-      _logDebug(string.format('[MobileMASH] Attempted to remove zone from MEDEVAC system: %s', name))
     end
     
     -- Send destruction message

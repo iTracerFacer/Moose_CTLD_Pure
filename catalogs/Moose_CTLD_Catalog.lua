@@ -268,20 +268,14 @@ cat['BLUE_MQ9']               = { menuCategory='Drones', menu='MQ-9 Reaper - JTA
 cat['RED_WINGLOONG']          = { menuCategory='Drones', menu='WingLoong-I - JTAC', description='WingLoong-I JTAC', dcsCargoType='container_cargo', required=1, initialStock=3, side=RED,  category=Group.Category.AIRPLANE, build=singleAirUnit('WingLoong-I'), roles={'JTAC'}, jtac={ platform='air' } }
 
 -- FOB crates (Support) — three small crates build a FOB site
-cat['FOB_SMALL']              = { hidden=true, description='FOB small crate', dcsCargoType='container_cargo', required=1, initialStock=12, side=nil, category=Group.Category.GROUND, build=function(point, headingDeg)
-  -- spawns a harmless placeholder truck for visibility; consumed by FOB_SITE build
-  return singleUnit('Ural-375')(point, headingDeg)
-end }
+cat['FOB_SMALL']              = { hidden=true, description='FOB small crate', dcsCargoType='container_cargo', required=1, initialStock=12, side=nil, category=Group.Category.GROUND }
 cat['FOB_SITE']               = { menuCategory='Support', menu='FOB Crates - All', description='FOB Site', isFOB=true, dcsCargoType='container_cargo', requires={ FOB_SMALL=3 }, initialStock=0, side=nil, category=Group.Category.GROUND,
   build=multiUnits({ {type='HEMTT TFFT'}, {type='Ural-375 PBU', dx=10, dz=8}, {type='Ural-375', dx=-10, dz=8} }) }
 
 -- Mobile MASH (Support) — three crates build a Mobile MASH unit
-cat['MOBILE_MASH_SMALL']      = { hidden=true, description='Mobile MASH crate', dcsCargoType='container_cargo', required=1, initialStock=6, side=nil, category=Group.Category.GROUND, build=function(point, headingDeg)
-  -- spawns placeholder truck for visibility; consumed by MOBILE_MASH build
-  return singleUnit('Ural-375')(point, headingDeg)
-end }
-cat['BLUE_MOBILE_MASH']       = { menuCategory='Support', menu='Mobile MASH - All', description='Blue Mobile MASH Unit', isMobileMASH=true, dcsCargoType='container_cargo', requires={ MOBILE_MASH_SMALL=3 }, initialStock=0, side=BLUE, category=Group.Category.GROUND, build=singleUnit('M-113') }
-cat['RED_MOBILE_MASH']        = { menuCategory='Support', menu='Mobile MASH - All', description='Red Mobile MASH Unit', isMobileMASH=true, dcsCargoType='container_cargo', requires={ MOBILE_MASH_SMALL=3 }, initialStock=0, side=RED, category=Group.Category.GROUND, build=singleUnit('BTR_D') }
+cat['MOBILE_MASH_SMALL']      = { hidden=true, description='Mobile MASH crate', dcsCargoType='container_cargo', required=1, initialStock=3, side=nil, category=Group.Category.GROUND }
+cat['BLUE_MOBILE_MASH']       = { menuCategory='Support', menu='Mobile MASH - All', description='Blue Mobile MASH Unit', isMobileMASH=true, dcsCargoType='container_cargo', requires={ MOBILE_MASH_SMALL=3 }, initialStock=0, side=BLUE, category=Group.Category.GROUND, build=multiUnits({ {type='M-113'}, {type='M-113', dx=10, dz=8}, {type='M-113', dx=-10, dz=8} }) }
+cat['RED_MOBILE_MASH']        = { menuCategory='Support', menu='Mobile MASH - All', description='Red Mobile MASH Unit', isMobileMASH=true, dcsCargoType='container_cargo', requires={ MOBILE_MASH_SMALL=3 }, initialStock=0, side=RED, category=Group.Category.GROUND, build=multiUnits({ {type='BTR_D'}, {type='BTR_D', dx=10, dz=8}, {type='BTR_D', dx=-10, dz=8} }) }
 
 -- =========================
 -- Troop Type Definitions
