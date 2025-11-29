@@ -10712,7 +10712,8 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalition)
   _logInfo(string.format('Spawning FARP Stage %d statics for zone %s (coalition %d)', stage, zoneName, coalition))
   
   -- Get coalition name for DCS
-  local coalitionName = (coalition == coalition.side.BLUE) and 'blue' or 'red'
+  -- Note: 'coalition' parameter is a number (1=red, 2=blue), not the coalition table
+  local coalitionName = (coalition == 2) and 'blue' or 'red'
   
   for _, obj in ipairs(layout) do
     -- Calculate world position from relative offset

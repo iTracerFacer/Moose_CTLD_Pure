@@ -80,8 +80,8 @@ THREAT_CHECK_INTERVAL = 3           -- Faster sweeps so we tag threats before co
 -- Distance Thresholds (in meters)
 DESTINATION_REACHED_DISTANCE = 100  -- Distance to consider destination reached
 MINIMUM_ROUTE_DISTANCE = 5000       -- Minimum distance from spawn to destination (prevents exploits)
-THREAT_DETECTION_RANGE = 10000      -- Detect armor ahead of effective weapon range
-THREAT_CLEARED_RANGE = 11000        -- Give a little buffer before calling area safe
+THREAT_DETECTION_RANGE = 5000      -- Detect armor ahead of effective weapon range
+THREAT_CLEARED_RANGE = 6000        -- Give a little buffer before calling area safe
 
 ROUTE_CHECK_INTERVAL = 3            -- Seconds between route integrity scans
 ROUTE_DEVIATION_THRESHOLD = 750     -- Meters away from mission destination before re-routing
@@ -129,6 +129,7 @@ MOOSE_CONVOY = {
     IntelMarkLookup = {},    -- Fast lookup for intel mark IDs
     MarkIdCounter = 0,       -- Sequential mark IDs for intel marks
     LastSmokeTime = {},      -- Per-convoy last smoke timestamp
+    ThreatScanSets = {},     -- Cached SET_GROUP objects for threat detection (per coalition)
 }
 
 -------------------------------------------------------------------
@@ -763,6 +764,21 @@ function MOOSE_CONVOY:GetConvoyByUnitName(unitName)
     return nil
 end
 
+--- Get or create cached threat scan SET_GROUP for a coalition
+-- @param #string enemyCoalition Coalition string ("red" or "blue")
+-- @return #SET_GROUP Cached or new scan set
+function MOOSE_CONVOY:GetThreatScanSet(enemyCoalition)
+    if not self.ThreatScanSets[enemyCoalition] then
+        self:Log("DEBUG", string.format("Creating cached threat scan set for %s coalition", enemyCoalition))
+        self.ThreatScanSets[enemyCoalition] = SET_GROUP:New()
+            :FilterCoalitions(enemyCoalition)
+            :FilterCategoryGround()
+            :FilterActive(true)
+            :FilterStart()
+    end
+    return self.ThreatScanSets[enemyCoalition]
+end
+
 --- Determine current speed of the convoy in km/h (first alive unit sample)
 -- @return #number Speed in km/h
 function MOOSE_CONVOY:GetCurrentSpeedKmh()
@@ -1007,6 +1023,21 @@ function MOOSE_CONVOY:MonitorRouteIntegrity(forceOverride)
     local distance = math.sqrt(dx * dx + dy * dy)
 
     if distance > ROUTE_DEVIATION_THRESHOLD then
+        -- Edge case: If convoy is far from destination and possibly backtracking to reach
+        -- the road network, allow more tolerance before declaring a deviation
+        local currentPos = self.Group:GetCoordinate()
+        if currentPos and self.DestPoint then
+            local distToDestination = currentPos:Get2DDistance(self.DestPoint)
+            local speed = self:GetCurrentSpeedKmh()
+            
+            -- If we're moving and still far from destination, convoy might be taking
+            -- an indirect route to reach roads. Give it time unless deviation is extreme.
+            if speed > 0.5 and distToDestination > (self.InitialDistance * 0.8) and distance < (ROUTE_DEVIATION_THRESHOLD * 2) then
+                self:Log("DEBUG", string.format("%s route deviation %.0fm during initial navigation - allowing indirect path", self.Name, distance))
+                return
+            end
+        end
+        
         if lastCommand > 0 and (now - lastCommand) < ROUTE_REISSUE_MIN_INTERVAL then
             self.RouteNeedsRefresh = true
             return
@@ -1200,6 +1231,9 @@ function MOOSE_CONVOY:HandleUnitHit(EventData)
 
     local convoy = self:GetConvoyByUnitName(unitName)
     if not convoy then return end
+    
+    -- Ensure cache is current for accurate tracking
+    convoy:CacheUnitNames()
 
     local attacker = EventData.IniUnit or EventData.IniDCSUnit or EventData.WeaponOwner
     convoy:OnUnderFire(attacker, targetUnit, EventData)
@@ -1218,6 +1252,7 @@ function MOOSE_CONVOY:HandleUnitDead(EventData)
     if not convoy then return end
 
     convoy.UnitNames[unitName] = nil
+    convoy.UnitNamesDirty = true  -- Mark for rebuild on next check
     convoy:CacheUnitNames()
 
     local attacker = EventData.TgtUnit or EventData.WeaponOwner
@@ -1263,6 +1298,7 @@ function MOOSE_CONVOY:NewConvoy(templateName, spawnPoint, destPoint, convoyCoali
         SchedulerID = nil,
         ContactReason = nil,
         UnitNames = {},
+        UnitNamesDirty = true,   -- Flag to rebuild unit name cache when needed
         LastUnderFireAlert = 0,
         LastHoldEnforce = 0,
         LastRouteReissue = 0,
@@ -1315,7 +1351,12 @@ function MOOSE_CONVOY:Spawn()
 end
 
 --- Refresh cached unit name lookups for this convoy
-function MOOSE_CONVOY:CacheUnitNames()
+-- @param #boolean force Force rebuild even if not dirty
+function MOOSE_CONVOY:CacheUnitNames(force)
+    if not force and not self.UnitNamesDirty then
+        return  -- Cache is still valid
+    end
+    
     self.UnitNames = {}
     if not self.Group then return end
     local units = self.Group:GetUnits()
@@ -1328,6 +1369,7 @@ function MOOSE_CONVOY:CacheUnitNames()
             end
         end
     end
+    self.UnitNamesDirty = false
 end
 
 --- Called when convoy is spawned
@@ -1497,11 +1539,8 @@ function MOOSE_CONVOY:CheckForThreats()
 
     local enemyCoalition = (self.Coalition == coalition.side.RED) and "blue" or "red"
 
-    local scanSet = SET_GROUP:New()
-        :FilterCoalitions(enemyCoalition)
-        :FilterCategoryGround()
-        :FilterActive(true)
-        :FilterOnce()
+    -- Use cached SET_GROUP for better performance
+    local scanSet = MOOSE_CONVOY:GetThreatScanSet(enemyCoalition)
 
     local threatsFound = false
     local closestThreat = nil
@@ -1672,11 +1711,8 @@ function MOOSE_CONVOY:CheckThreatsCleared()
 
     local enemyCoalition = (self.Coalition == coalition.side.RED) and "blue" or "red"
 
-    local scanSet = SET_GROUP:New()
-        :FilterCoalitions(enemyCoalition)
-        :FilterCategoryGround()
-        :FilterActive(true)
-        :FilterOnce()
+    -- Use cached SET_GROUP for better performance
+    local scanSet = MOOSE_CONVOY:GetThreatScanSet(enemyCoalition)
 
     local threatsRemain = false
 
