@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-field
 -- Moose_CTLD_FAC.lua
 --[[
 Full-featured FAC/RECCE module (FAC2 parity) for pure-MOOSE CTLD, without MIST

@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-field, deprecated
 -- Pure-MOOSE, template-free CTLD-style logistics & troop transport
 -- Drop-in script: no MIST, no mission editor templates required
 -- Dependencies: Moose.lua must be loaded before this script
@@ -4606,7 +4607,9 @@ end
 local function _bearingDeg(from, to)
   local dx = (to.x - from.x)
   local dz = (to.z - from.z)
-  local ang = math.deg(math.atan2(dx, dz)) -- 0=N, +CW
+  -- Use math.atan2 for LuaJIT/Lua 5.1 (DCS environment), fallback to math.atan for Lua 5.4+
+  local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+  local ang = atan2(dx, dz) * (180 / math.pi) -- 0=N, +CW
   if ang < 0 then ang = ang + 360 end
   return math.floor(ang + 0.5)
 end
@@ -13544,7 +13547,9 @@ function CTLD:VectorsToNearestMEDEVAC(group)
     
     local dx = data.position.x - pos.x
     local dz = data.position.z - pos.z
-    local bearing = math.deg(math.atan2(dz, dx))
+    -- DCS uses LuaJIT (Lua 5.1) which has math.atan2, not math.atan(y,x)
+    local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+    local bearing = math.deg(atan2(dz, dx))
     if bearing < 0 then bearing = bearing + 360 end
     
     local relativeBrg = bearing - heading
