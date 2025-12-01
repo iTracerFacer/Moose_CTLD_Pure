@@ -1,6 +1,6 @@
 # MOOSE CTLD/FAC and Convoy Scripts
 
-This repository contains MOOSE-based scripts for enhancing DCS World missions with advanced logistics, troop transport, forward air control, and convoy management capabilities.
+This repository contains MOOSE-based scripts for enhancing DCS World missions with advanced logistics, troop transport, forward air control, and convoy management capabilities. CTLD was orignialy created by Ciribob using the MIST framework. I've converted his work to only use moose and have added many features included integrated MEDEVAC and Salvage system which both can have a direct impact on the state of a mission. 
 
 ## Overview
 
