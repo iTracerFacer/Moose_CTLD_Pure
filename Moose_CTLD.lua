@@ -15,6 +15,9 @@
 -- Orignal Author of CTLD: Ciribob
 -- Moose adaptation: Lathe, Copilot, F99th-TracerFacer
 
+---@diagnostic disable: undefined-global, lowercase-global
+-- MOOSE framework globals are defined at runtime by DCS World
+
 --#region Config
 _DEBUG = true
 local CTLD = {}
