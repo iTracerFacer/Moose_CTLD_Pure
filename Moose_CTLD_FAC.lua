@@ -233,7 +233,7 @@ end
 local function _bearingDeg(from, to)
   local dx = (to.x - from.x)
   local dz = (to.z - from.z)
-  local ang = math.deg(math.atan2(dx, dz))
+  local ang = math.deg(math.atan(dx, dz))
   if ang < 0 then ang = ang + 360 end
   return math.floor(ang + 0.5)
 end
@@ -248,12 +248,13 @@ local function _getHeading(unit)
   -- Approximate true heading using unit orientation + true north correction
   local pos = unit:getPosition()
   if pos then
-    local heading = math.atan2(pos.x.z, pos.x.x)
+    ---@diagnostic disable-next-line: deprecated
+    local heading = math.atan(pos.x.z, pos.x.x)
     -- add true-north correction
     local p = pos.p
     local lat, lon = coord.LOtoLL(p)
     local northPos = coord.LLtoLO(lat + 1, lon)
-    heading = heading + math.atan2(northPos.z - p.z, northPos.x - p.x)
+    heading = heading + math.atan(northPos.z - p.z, northPos.x - p.x)
     if heading < 0 then heading = heading + 2*math.pi end
     return heading
   end
@@ -1225,8 +1226,11 @@ function FAC:_findNearestEnemy(facUnit, targetType)
     local d = _distance(up, origin)
     if d >= best then return end
     local allowed = true
-    if targetType == 'vehicle' then allowed = _isVehicle(u)
-    elseif targetType == 'troop' then allowed = _isInfantry(u) end
+    if targetType == 'vehicle' then
+      allowed = _isVehicle(u) and true or false
+    elseif targetType == 'troop' then
+      allowed = _isInfantry(u) and true or false
+    end
     if not allowed then return end
     if land.isVisible({x=up.x,y=up.y+2,z=up.z}, {x=origin.x,y=origin.y+2,z=origin.z}) and u:isActive() then
       best = d; nearest = u
@@ -1360,7 +1364,7 @@ function FAC:_scanManualList(group)
       local p = v:getPoint()
       local d = _distance(p, origin)
       local dy, dx = p.z - origin.z, p.x - origin.x
-      local hdg = math.deg(math.atan2(dx, dy))
+      local hdg = math.deg(math.atan(dx, dy))
       if hdg < 0 then hdg = hdg + 360 end
       if gid then
         trigger.action.outTextForGroup(gid, string.format('Target %d: %s Bearing %d Range %dm/%dft', i, v:getTypeName(), math.floor(hdg+0.5), math.floor(d), math.floor(d*3.28084)), 30)

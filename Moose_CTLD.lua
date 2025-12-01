@@ -7044,7 +7044,7 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
     end
 
     -- Current launchers in site
-    local curLaunchers = (bestInfo.byType[tpl.launcherType] or 0)
+    local curLaunchers = (bestInfo and bestInfo.byType and bestInfo.byType[tpl.launcherType]) or 0
     local maxL = tpl.maxLaunchers or (curLaunchers + cratesAvail)
     local canAdd = math.max(0, (maxL - curLaunchers))
     if canAdd <= 0 then
@@ -7083,8 +7083,12 @@ function CTLD:BuildSpecificAtGroup(group, recipeKey, opts)
     -- Destroy old group, spawn new one
     local oldName = bestG:getName()
     local newLauncherCount = curLaunchers + addNum
-    local center = bestInfo.center
-    local headingDeg = bestInfo.headingDeg()
+    local center = bestInfo and bestInfo.center
+    if not center then
+      _msgGroup(group, 'Failed to determine SAM site center position.')
+      return
+    end
+    local headingDeg = (bestInfo and bestInfo.headingDeg and bestInfo.headingDeg()) or 0
     if Group.getByName(oldName) then pcall(function() Group.getByName(oldName):destroy() end) end
     local gdata = buildSite({ x = center.x, z = center.z }, headingDeg, tpl.side, newLauncherCount)
     local newG = _coalitionAddGroup(tpl.side, Group.Category.GROUND, gdata, self.Config)
@@ -10699,7 +10703,6 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
   local serviceVehicles = {
     ["M978 HEMTT Tanker"] = true,      -- Refuel service
     ["Ural-375 PBU"] = true,           -- Fuel support
-    ["M978 HEMTT Tanker"] = true,      -- Additional fuel
     ["Ural-4320 APA-5D"] = true,       -- Ammo truck for rearm
     ["M1043 HMMWV Armament"] = true,   -- Command/coordination
     ["GAZ-66"] = true,                 -- Support vehicle
@@ -11509,7 +11512,10 @@ function CTLD:_SpawnMEDEVACCrew(eventData, catalogEntry)
       survivalChance = cfg.CrewSurvivalChance[self.Side] or 0.02
     else
       -- Legacy single value config (backward compatibility)
-      survivalChance = cfg.CrewSurvivalChance
+      local chanceValue = cfg.CrewSurvivalChance
+      if type(chanceValue) == 'number' then
+        survivalChance = chanceValue
+      end
     end
   end
   
@@ -11637,7 +11643,10 @@ function CTLD:_SpawnMEDEVACCrew(eventData, catalogEntry)
         manPadChance = cfg.ManPadSpawnChance[selfref.Side] or 0.1
       else
         -- Legacy single value config (backward compatibility)
-        manPadChance = cfg.ManPadSpawnChance
+        local chanceValue = cfg.ManPadSpawnChance
+        if type(chanceValue) == 'number' then
+          manPadChance = chanceValue
+        end
       end
     end
     local spawnManPad = math.random() <= manPadChance
@@ -13663,7 +13672,7 @@ function CTLD:PopSmokeAtMEDEVACSites(group)
   end
   
   local count = 0
-  _logVerbose(string.format('[MEDEVAC] Checking %d crew entries', CTLD._medevacCrews and table.getn(CTLD._medevacCrews) or 0))
+  _logVerbose(string.format('[MEDEVAC] Checking %d crew entries', CTLD._medevacCrews and #CTLD._medevacCrews or 0))
   
   for crewGroupName, data in pairs(CTLD._medevacCrews) do
     if data and data.side == self.Side and data.requestTime and data.position then
@@ -14992,7 +15001,7 @@ function CTLD:ShowNearestSalvageCrate(group)
     end
   end
   
-  if not nearestName then
+  if not nearestName or not nearestMeta or not nearestMeta.position then
     local msg = self.Messages.slingload_salvage_no_crates or 'No active salvage crates available.'
     _msgGroup(group, msg)
     return

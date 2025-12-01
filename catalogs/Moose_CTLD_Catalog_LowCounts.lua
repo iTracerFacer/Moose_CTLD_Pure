@@ -85,7 +85,7 @@ local function multiUnits(units)
     local function off(dx, dz) return { x = point.x + dx, z = point.z + dz } end
     local list = {}
     for i,u in ipairs(units) do
-      local p = off(u.dx or 0, u.dz or 3*i)
+      local p = off(u.dx or 0, u.dz or (3*i))
       table.insert(list, {
         type = u.type, name = string.format('CTLD-%s-%d', u.type, math.random(100000,999999)),
         x = p.x, y = p.z, heading = hdg
