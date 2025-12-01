@@ -15,7 +15,7 @@
 -- Orignal Author of CTLD: Ciribob
 -- Moose adaptation: Lathe, Copilot, F99th-TracerFacer
 
--- #region Config
+--#region Config
 _DEBUG = true
 local CTLD = {}
 CTLD.Version = '1.0.2'
@@ -346,7 +346,7 @@ CTLD.Messages = {
   mash_no_zones = "No MASH zones available.",
 }
 
--- #endregion Messaging
+--#endregion Messaging
 
 CTLD.Config = {
   -- === Instance & Access ===
@@ -687,7 +687,7 @@ CTLD.Config = {
     },
   },
 }
-  -- #endregion Config
+--#endregion Config
 
 -- =========================
 -- FARP System Configuration
@@ -1151,7 +1151,7 @@ CTLD.GroundLoadComms = {
 -- =========================
 -- MEDEVAC Configuration
 -- =========================
--- #region MEDEVAC Config
+--#region MEDEVAC Config
 CTLD.MEDEVAC = {
   Enabled = true,
   
@@ -1950,16 +1950,16 @@ CTLD.MEDEVAC = {
 -- =========================
 -- Sling-Load Salvage Configuration (MOVED)
 -- =========================
--- #region SlingLoadSalvage Config
+--#region SlingLoadSalvage Config
 -- NOTE: SlingLoadSalvage configuration has been MOVED into CTLD.Config.SlingLoadSalvage
 -- so that it properly gets copied to each CTLD instance via DeepCopy/DeepMerge.
 -- The old CTLD.SlingLoadSalvage global definition here is removed to avoid confusion.
 -- See CTLD.Config.SlingLoadSalvage above for the actual configuration.
--- #endregion SlingLoadSalvage Config
+--#endregion SlingLoadSalvage Config
 --===================================================================================================================================================
--- #endregion MEDEVAC Config
+--#endregion MEDEVAC Config
 
-  -- #region State
+  --#region State
   -- Internal state tables
 CTLD._instances = CTLD._instances or {}
 CTLD._crates = {}          -- [crateName] = { key, zone, side, spawnTime, point }
@@ -2168,12 +2168,12 @@ function CTLD:_CheckCrateZoneHints(crateName, meta, cratePos)
   end
 end
 
-  -- #endregion State
+  --#endregion State
 
 -- =========================
 -- Utilities
 -- =========================
-  -- #region Utilities
+  --#region Utilities
 
 -- Select a random crate spawn point inside the zone while respecting separation rules.
 function CTLD:_computeCrateSpawnPoint(zone, opts)
@@ -4813,12 +4813,12 @@ function CTLD:IsPointInFOBZones(point)
   return false, nil
 end
 
--- #endregion Utilities
+--#endregion Utilities
 
 -- =========================
 -- Construction
 -- =========================
--- #region Construction
+--#region Construction
 function CTLD:New(cfg)
   local o = setmetatable({}, self)
   o.Config = DeepCopy(CTLD.Config)
@@ -5229,12 +5229,12 @@ function CTLD:ValidateZones()
 
   self._MissingZones = missing
 end
--- #endregion Construction
+--#endregion Construction
 
 -- =========================
 -- Menus
 -- =========================
--- #region Menus
+--#region Menus
 function CTLD:InitMenus()
   if self.Config.UseGroupMenus then
     -- Create placeholder menu at mission start to reserve F10 position if requested
@@ -8029,12 +8029,12 @@ function CTLD:InitCoalitionAdminMenu()
   -- Player Help submenu (was below; removed there and added above)
   self.AdminMenu = root
 end
--- #endregion Menus
+--#endregion Menus
 
 -- =========================
 -- Coalition Summary
 -- =========================
--- #region Coalition Summary
+--#region Coalition Summary
 function CTLD:ShowCoalitionSummary()
   -- Crate counts per type (this coalition)
   local perType = {}
@@ -8131,12 +8131,12 @@ function CTLD:ShowCoalitionSummary()
 
   _msgCoalition(self.Side, table.concat(lines, '\n'), 25)
 end
--- #endregion Coalition Summary
+--#endregion Coalition Summary
 
 -- =========================
 -- Crates
 -- =========================
--- #region Crates
+--#region Crates
 -- Note: Menu creation lives in the Menus region; this section handles crate request/spawn/nearby/cleanup only.
 function CTLD:RequestCrateForGroup(group, crateKey, opts)
   opts = opts or {}
@@ -8576,12 +8576,12 @@ function CTLD:PruneOrphanedState()
     _logVerbose(string.format('[StateMaint] Pruned %d orphaned state entries', pruned))
   end
 end
--- #endregion Crates
+--#endregion Crates
 
 -- =========================
 -- Build logic
 -- =========================
--- #region Build logic
+--#region Build logic
 function CTLD:BuildAtGroup(group, opts)
   local unit = group:GetUnit(1)
   if not unit or not unit:IsAlive() then return end
@@ -8920,12 +8920,12 @@ function CTLD:BuildAtGroup(group, opts)
     _msgGroup(group, 'No matching recipe found with nearby crates. Check Recipe Info for requirements.')
   end
 end
--- #endregion Build logic
+--#endregion Build logic
 
 -- =========================
 -- Loaded crate management
 -- =========================
--- #region Loaded crate management
+--#region Loaded crate management
 
 -- Update DCS internal cargo weight for a group
 function CTLD:_updateCargoWeight(group)
@@ -9235,12 +9235,12 @@ function CTLD:ShowNearestZoneInventory(group)
   _msgGroup(group, table.concat(lines, '\n'), 30)
 end
 
--- #endregion Loaded crate management
+--#endregion Loaded crate management
 
 -- =========================
 -- Hover pickup scanner
 -- =========================
--- #region Hover pickup scanner
+--#region Hover pickup scanner
 function CTLD:ScanHoverPickup()
   local coachCfg = CTLD.HoverCoachConfig or { enabled = false }
   if not coachCfg.enabled then return end
@@ -9597,12 +9597,12 @@ function CTLD:ScanHoverPickup()
     end
   end
 end
--- #endregion Hover pickup scanner
+--#endregion Hover pickup scanner
 
 -- =========================
 -- Ground Auto-Load Scanner
 -- =========================
--- #region Ground auto-load scanner
+--#region Ground auto-load scanner
 function CTLD:ScanGroundAutoLoad()
   local groundCfg = CTLD.GroundAutoLoadConfig or { Enabled = false }
   if not groundCfg.Enabled then return end
@@ -9911,12 +9911,12 @@ function CTLD:_loadCrateIntoAircraft(group, crateName, crateMeta)
   _logDebug(string.format('[Load] Loaded crate %s (%s) into %s', crateName, crateMeta.key, gname))
   return true
 end
--- #endregion Ground auto-load scanner
+--#endregion Ground auto-load scanner
 
 -- =========================
 -- Troops
 -- =========================
--- #region Troops
+--#region Troops
 function CTLD:_lookupCrateLabel(crateKey)
   if not crateKey then return 'Unknown Crate' end
   local cat = self.Config and self.Config.CrateCatalog or {}
@@ -10439,7 +10439,7 @@ function CTLD:UnloadTroops(group, opts)
     _eventSend(self, group, nil, 'troops_deploy_failed', { reason = 'DCS group spawn error' })
   end
 end
--- #endregion Troops
+--#endregion Troops
 
 -- Internal: resolve troop composition list for a given type key and coalition
 function CTLD:_resolveTroopUnits(typeKey)
@@ -10488,7 +10488,7 @@ end
 -- =========================
 -- Auto-build FOB in zones
 -- =========================
--- #region Auto-build FOB in zones
+--#region Auto-build FOB in zones
 function CTLD:AutoBuildFOBCheck()
   if not (self.FOBZones and #self.FOBZones > 0) then return end
   -- Find any FOB recipe definitions
@@ -10562,12 +10562,12 @@ function CTLD:AutoBuildFOBCheck()
     end
   end
 end
--- #endregion Auto-build FOB in zones
+--#endregion Auto-build FOB in zones
 
 -- =========================
 -- Public helpers
 -- =========================
--- #region Public helpers
+--#region Public helpers
 function CTLD:RegisterCrate(key, def)
   self.Config.CrateCatalog[key] = def
 end
@@ -10579,7 +10579,7 @@ end
 -- =========================
 -- Inventory helpers
 -- =========================
--- #region Inventory helpers
+--#region Inventory helpers
 function CTLD:InitInventory()
   if not (self.Config.Inventory and self.Config.Inventory.Enabled) then return end
   -- Seed stock for each configured pickup zone (by name only)
@@ -10625,12 +10625,12 @@ function CTLD:_CreateFOBPickupZone(point, cat, hdg)
     end
   end
 end
--- #endregion Inventory helpers
+--#endregion Inventory helpers
 
 -- =========================
 -- FARP System
 -- =========================
--- #region FARP
+--#region FARP
 
 -- Initialize FARP system (called from CTLD:New)
 function CTLD:InitFARP()
@@ -11104,12 +11104,12 @@ function CTLD:RequestFARPUpgrade(group)
   self:UpgradeFARP(group, zoneName)
 end
 
--- #endregion FARP
+--#endregion FARP
 
 -- =========================
 -- Sling-Load Salvage - Manual Crate Support
 -- =========================
--- #region Manual Salvage Crates
+--#region Manual Salvage Crates
 
 -- Scan mission editor for pre-placed cargo statics and register them as salvage
 function CTLD:ScanAndRegisterManualSalvageCrates()
@@ -11208,12 +11208,12 @@ function CTLD:ScanAndRegisterManualSalvageCrates()
   end
 end
 
--- #endregion Manual Salvage Crates
+--#endregion Manual Salvage Crates
 
 -- =========================
 -- MEDEVAC System
 -- =========================
--- #region MEDEVAC
+--#region MEDEVAC
 
 -- Initialize MEDEVAC system (called from CTLD:New)
 function CTLD:InitMEDEVAC()
@@ -13749,9 +13749,9 @@ function CTLD:ClearAllMEDEVACMissions(group)
   _logVerbose(string.format('[MEDEVAC] Admin cleared %d MEDEVAC missions for coalition %s', count, self.Side))
 end
 
--- #endregion MEDEVAC
+--#endregion MEDEVAC
 
--- #region Mobile MASH
+--#region Mobile MASH
 
 -- Create a Mobile MASH zone and start announcements
 function CTLD:_CreateMobileMASH(group, position, catalogDef)
@@ -14170,9 +14170,9 @@ function CTLD:_RemoveMobileMASH(mashId)
   end
 end
 
--- #endregion Mobile MASH
+--#endregion Mobile MASH
 
--- #endregion Inventory helpers
+--#endregion Inventory helpers
 
 -- Create a new Drop Zone (AO) at the player's current location and draw it on the map if enabled
 function CTLD:CreateDropZoneAtGroup(group)
@@ -14371,12 +14371,12 @@ if not CTLD._cleanupHandlerRegistered then
   end
 end
 
--- #endregion Public helpers
+--#endregion Public helpers
 
 -- =========================
 -- Sling-Load Salvage System
 -- =========================
--- #region SlingLoadSalvage
+--#region SlingLoadSalvage
 
 -- Spawn a salvage crate when an enemy ground unit dies
 function CTLD:_SpawnSlingLoadSalvageCrate(unitPos, unitTypeName, enemySide, eventData)
@@ -15010,16 +15010,17 @@ function CTLD:ShowNearestSalvageCrate(group)
   _msgGroup(group, msg)
 end
 
--- #endregion SlingLoadSalvage
+--#endregion SlingLoadSalvage
 
--- #endregion Public helpers
+--#endregion Public helpers
 
 -- =========================
 -- Return factory
 -- =========================
--- #region Export
+--#region Export
 _MOOSE_CTLD = CTLD
 return CTLD
--- #endregion Export
+--#endregion Export
+
 
 
