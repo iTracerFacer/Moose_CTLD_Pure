@@ -4,7 +4,8 @@
 -- Notes:
 -- - Each entry has keys: description/menu, dcsCargoType, required or requires (composite), side, category, build(point, headingDeg)
 -- - Single-unit entries spawn one unit by DCS type. Composite "SITE" entries spawn a multi-unit group approximating system components.
-
+---@diagnostic disable: undefined-global, lowercase-global
+-- MOOSE framework globals are defined at runtime by DCS World
 local function singleUnit(unitType)
   return function(point, headingDeg)
     local name = string.format('%s-%d', unitType, math.random(100000,999999))

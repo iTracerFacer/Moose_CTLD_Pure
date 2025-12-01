@@ -15,6 +15,8 @@
 --   RED : PICKUP_RED_MAIN,  DROP_RED_1,  FOB_RED_A
 -- Adjust names below if you use different zone names.
 
+---@diagnostic disable: undefined-global, lowercase-global
+-- MOOSE framework globals are defined at runtime by DCS World
 
 -- Create CTLD instances only if Moose and CTLD are available
 if _MOOSE_CTLD and _G.BASE then

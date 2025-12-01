@@ -24,6 +24,9 @@ Design notes
   are conservative approximations to avoid silent failures.
 ]]
 
+---@diagnostic disable: undefined-global, lowercase-global
+-- MOOSE framework globals are defined at runtime by DCS World
+
 if not _G.BASE then
   env.info('[Moose_CTLD_FAC] Moose (BASE) not detected. Ensure Moose.lua is loaded before this script.')
 end

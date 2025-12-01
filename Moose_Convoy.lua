@@ -27,6 +27,8 @@
 -------------------------------------------------------------------
 -- CONFIGURATION SECTION
 -------------------------------------------------------------------
+---@diagnostic disable: undefined-global, lowercase-global
+-- MOOSE framework globals are defined at runtime by DCS World
 
 -- Logging Configuration
 LOGGING_ENABLED = true           -- Enable/disable detailed logging
