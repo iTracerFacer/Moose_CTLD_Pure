@@ -19,7 +19,7 @@
 -- MOOSE framework globals are defined at runtime by DCS World
 
 --#region Config
-_DEBUG = true
+_DEBUG = false
 local CTLD = {}
 CTLD.Version = '1.0.2'
 CTLD.__index = CTLD
@@ -365,7 +365,7 @@ CTLD.Config = {
   -- 2 = INFO      - Important state changes, initialization, cleanup (default for production)
   -- 3 = VERBOSE   - Detailed operational info (zone validation, menus, builds, MEDEVAC events)
   -- 4 = DEBUG     - Everything including hover checks, crate pickups, detailed troop spawns
-  LogLevel = 4,  -- lowered from DEBUG (4) to INFO (2) for production performance
+  LogLevel = 1,  -- lowered from DEBUG (4) to INFO (2) for production performance
   MessageDuration = 15,                  -- seconds for on-screen messages
 
   -- Debug toggles for detailed crate proximity logging (useful when tuning hover coach / ground autoload)
