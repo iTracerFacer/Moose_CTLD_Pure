@@ -47,6 +47,86 @@ The Convoy script implements a dynamic convoy escort system featuring:
 - **Route integrity monitoring** to prevent waypoint manipulation
 - **Coalition-specific operations** with configurable templates
 
+## Integrated MEDEVAC and Salvage Systems
+
+The CTLD system includes two interconnected economy systems that create dynamic mission progression and resource management.
+
+### MEDEVAC (Medical Evacuation) System
+
+The MEDEVAC system simulates casualty evacuation and medical support:
+
+#### How It Works
+- When enemy ground vehicles are destroyed, surviving crew members spawn at the wreck location
+- Crews broadcast distress calls with their grid coordinates and request immediate evacuation
+- Players must respond quickly - crews have a limited survival window (typically 15-30 minutes)
+- Failed evacuations result in crew KIA and permanent vehicle loss
+
+#### Evacuation Process
+1. **Receive Alert**: Coalition receives MEDEVAC request with grid coordinates and crew count
+2. **Locate Crew**: Use F10 menu to get vectors to stranded personnel
+3. **Pickup**: Land or hover near crew location and hold position to load casualties
+4. **Transport**: Fly crew to an active MASH (Mobile Army Surgical Hospital) zone
+5. **Delivery**: Land in MASH zone and hold for offloading (typically 25 seconds)
+6. **Reward**: Earn salvage points based on crew size and vehicle type
+
+#### Salvage Points
+- Salvage points are earned by successfully delivering MEDEVAC crews to MASH zones
+- Points accumulate per coalition and are shared across all players
+- Higher-value vehicles (tanks, IFVs) provide more salvage points
+- Points can be used to "purchase" out-of-stock items from the crate catalog
+
+### Sling-Load Salvage System
+
+The salvage system creates opportunistic resource collection from battlefield wreckage:
+
+#### How It Works
+- When enemy units are destroyed, there's a chance (configurable per coalition) that salvageable wreckage spawns
+- Wreckage appears as cargo crates with weight, value, and expiration timers
+- Players can sling-load these crates using helicopters and deliver them to salvage collection zones
+
+#### Salvage Categories
+- **Light Salvage**: 500-1000kg, 1-2 points (50% spawn chance)
+- **Medium Salvage**: 2501-5000kg, 5-10 points (30% spawn chance)  
+- **Heavy Salvage**: 5001-8000kg, 15-24 points (15% spawn chance)
+- **Super Heavy Salvage**: 8001-12000kg, 32-48 points (5% spawn chance)
+
+#### Collection Process
+1. **Locate Wreckage**: Receive coalition alert with grid coordinates and estimated value
+2. **Sling Load**: Hover over crate and hook it with helicopter sling
+3. **Transport**: Fly crate to an active salvage collection zone
+4. **Delivery**: Release sling within zone boundaries to complete delivery
+5. **Condition Bonus**: Intact deliveries receive full value; damaged crates lose value
+
+#### Dynamic Features
+- **Expiration Timers**: Crates deteriorate over time (default 1 hour) if not collected
+- **Weight Simulation**: Heavier crates affect helicopter performance
+- **Zone Restrictions**: Must deliver to designated salvage zones for credit
+- **Condition Multipliers**: Undamaged (1.5x), Damaged (1.0x), Heavy Damage (0.5x)
+
+### Strategic Impact
+
+These systems create several gameplay dynamics:
+
+#### Resource Scarcity
+- Limited initial salvage points encourage early MEDEVAC operations
+- Out-of-stock items can only be unlocked through salvage accumulation
+- Players must balance combat operations with logistics support
+
+#### Mission Progression
+- Successful MEDEVAC operations provide resources for advanced builds
+- Salvage collection creates incentives for aggressive operations
+- Failed evacuations represent permanent losses that affect mission outcome
+
+#### Coalition Competition
+- Salvage points are tracked per coalition
+- Both sides can collect salvage from enemy wrecks
+- Resource advantages can shift based on operational success
+
+#### Risk/Reward Balance
+- High-value targets provide more salvage but are more dangerous
+- Time pressure on MEDEVAC creates urgency without being punitive
+- Salvage collection rewards thorough battlefield cleanup
+
 ## Setup Instructions
 
 ### Prerequisites
@@ -211,6 +291,22 @@ See `Moose_CTLD_Init_DualCoalitions.lua` for a complete example setting up both 
 7. **Build Units** using Operations → Build menus
 8. **Load/Deploy Troops** for combat operations
 
+#### MEDEVAC Operations
+1. **Monitor for Alerts** when enemy vehicles are destroyed
+2. **Get Vectors** using F10 → CTLD → Navigation → MEDEVAC Vectors
+3. **Pickup Crews** by landing/hovering at their location and holding position
+4. **Transport to MASH** zone (marked with beacons and smoke)
+5. **Deliver** by landing in MASH zone and holding for offloading
+6. **Earn Salvage Points** for successful deliveries
+
+#### Salvage Collection
+1. **Receive Alerts** when enemy wrecks spawn salvage opportunities
+2. **Locate Crates** using F10 → CTLD → Navigation → Salvage Vectors
+3. **Sling Load** by hovering over crate and hooking with helicopter
+4. **Transport to Zone** fly to active salvage collection zone
+5. **Deliver** by releasing sling within zone boundaries
+6. **Check Status** using F10 → CTLD → Logistics → Salvage Status
+
 ### FAC Operations
 
 1. **Spawn** in a FAC-configured aircraft (group name containing "AFAC", "RECON", or "RECCE")
@@ -251,9 +347,20 @@ AircraftCapacities = {
 
 ### MEDEVAC System
 
-- `InitialSalvage`: Starting salvage points
-- `MobileMASH.Enabled`: Deployable medical units
-- `SlingLoadSalvage.Enabled`: Salvage collection from wrecks
+- `InitialSalvage`: Starting salvage points for the coalition
+- `MobileMASH.Enabled`: Enable deployable MASH units via crate builds
+- `MobileMASH.ZoneRadius`: Radius of MASH zones in meters
+- `MobileMASH.BeaconFrequency`: Radio frequency for MASH beacons
+- `MobileMASH.AnnouncementInterval`: How often MASH locations are announced (seconds)
+
+### Sling-Load Salvage System
+
+- `SlingLoadSalvage.Enabled`: Master switch for salvage system
+- `SlingLoadSalvage.SpawnChance`: Probability of salvage spawning when enemy units die (per coalition)
+- `SlingLoadSalvage.WeightClasses`: Configuration for salvage categories and values
+- `SlingLoadSalvage.CrateLifetime`: Time before salvage crates expire (seconds)
+- `SlingLoadSalvage.MaxActiveCrates`: Maximum simultaneous salvage crates per coalition
+- `SlingLoadSalvage.ConditionMultipliers`: Value modifiers based on delivery condition
 
 ## Troubleshooting
 
