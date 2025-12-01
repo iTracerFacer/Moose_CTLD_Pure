@@ -182,13 +182,14 @@ CTLD.Messages = {
   
   -- FARP System messages
   farp_upgrade_started = "Upgrading FOB to FARP Stage {stage}... Building in progress.",
-  farp_upgrade_complete = "{player} upgraded FOB to FARP Stage {stage}!\nFARP Services: {services}\nFOB still active for logistics and troop operations.",
+  farp_upgrade_complete = "{player} upgraded FOB to FARP Stage {stage}!\nFOB still active for logistics and troop operations.",
+  farp_upgrade_complete_stage3 = "{player} upgraded FOB to FARP Stage 3!\nFunctional FARP operational! Use F8 Ground Crew for refuel/rearm services.\nFOB still active for logistics and troop operations.",
   farp_upgrade_insufficient_salvage = "Insufficient salvage to upgrade to FARP Stage {stage}. Need {need} points (have {current}). Deliver crews to MASH or sling-load salvage!",
-  farp_status = "FOB + FARP Status: Stage {stage}/{max_stage}\nFARP Services: {services}\nFOB logistics: ACTIVE\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
-  farp_status_maxed = "FOB + FARP Status: Stage {stage}/{max_stage} (FULLY UPGRADED)\nFARP Services: {services}\nFOB logistics: ACTIVE",
+  farp_status = "FOB + FARP Status: Stage {stage}/{max_stage}\nInfrastructure only - upgrade to Stage 3 for services\nFOB logistics: ACTIVE\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
+  farp_status_stage3 = "FOB + FARP Status: Stage 3/3\nFunctional FARP operational - use F8 Ground Crew menu\nFOB logistics: ACTIVE\nNext upgrade: {next_cost} salvage (Stage {next_stage})",
+  farp_status_maxed = "FOB + FARP Status: Stage 3/3 (FULLY UPGRADED)\nFunctional FARP operational - use F8 Ground Crew menu\nFOB logistics: ACTIVE",
   farp_not_at_fob = "You must be near a FOB Pickup Zone to upgrade it to a FARP.",
   farp_already_maxed = "This FOB is already at maximum FARP stage (Stage 3).",
-  farp_service_available = "FARP services available: Rearm, Refuel, Repair for ground vehicles and helicopters within {radius}m. FOB logistics remain active.",
   slingload_salvage_warn_5min = "SALVAGE URGENT: Crate {id} at {grid} expires in 5 minutes!",
   slingload_salvage_hooked_in_zone = "Salvage crate {id} is inside {zone}. Release the sling to complete delivery.",
   slingload_salvage_wrong_zone = "Salvage crate {id} is sitting in {zone_type} zone {zone}. Take it to an active Salvage zone for credit.",
@@ -361,7 +362,7 @@ CTLD.Config = {
   -- 2 = INFO      - Important state changes, initialization, cleanup (default for production)
   -- 3 = VERBOSE   - Detailed operational info (zone validation, menus, builds, MEDEVAC events)
   -- 4 = DEBUG     - Everything including hover checks, crate pickups, detailed troop spawns
-  LogLevel = 1,  -- lowered from DEBUG (4) to INFO (2) for production performance
+  LogLevel = 4,  -- lowered from DEBUG (4) to INFO (2) for production performance
   MessageDuration = 15,                  -- seconds for on-screen messages
 
   -- Debug toggles for detailed crate proximity logging (useful when tuning hover coach / ground autoload)
@@ -702,88 +703,74 @@ CTLD.FARPConfig = {
     [3] = 8,   -- Stage 2 -> Stage 3 (full forward airbase)
   },
   
-  -- Service zone radius for rearm/refuel at each stage
+  -- FARP static object provides services via DCS F8 Ground Crew menu
+  -- These radius values are for visual reference only
   ServiceRadius = {
     [1] = 50,   -- Stage 1: basic pad only
-    [2] = 65,   -- Stage 2: fuel operations
-    [3] = 80,   -- Stage 3: full services
+    [2] = 65,   -- Stage 2: fuel depot added
+    [3] = 80,   -- Stage 3: full FARP with ammo
   },
   
   -- Static object layouts for each FARP stage
   -- Format: { type = "DCS_Static_Name", x = offset_x, z = offset_z, heading = degrees, height = 0 }
   -- Positions are relative to FOB center point
+  -- Layout: Square perimeter expanding outward
+  -- NOTE: Functional FARP at Stage 3 is ~270m edge-to-edge, so Stages 1-2 must be outside that
   StageLayouts = {
-    -- Stage 1: Basic FARP Pad (3 salvage) - Inner ring 30-60m
+    -- Stage 1: Inner Square Perimeter (3 salvage) - 150m from center (outside FARP footprint)
     [1] = {
-      { type = "FARP CP Blindage", x = 0, z = 40, heading = 0 },
-      { type = "FARP Tent", x = 45, z = 20, heading = 30 },
-      { type = "FARP Tent", x = -45, z = 20, heading = 330 },
-      { type = "container_20ft", x = 35, z = -30, heading = 338 },
-      { type = "container_20ft", x = -35, z = -30, heading = 202 },
-      { type = "Windsock", x = 0, z = 60, heading = 0 },
-      { type = "FARP Ammo Dump Coating", x = 30, z = -25, heading = 219 },
-      { type = "FARP Ammo Dump Coating", x = -30, z = -25, heading = 141 },
-      { type = "FARP Fuel Depot", x = 40, z = 30, heading = 30 },
-      { type = "FARP Fuel Depot", x = -40, z = 30, heading = 330 },
-      { type = "GeneratorF", x = 50, z = -10, heading = 278 },
-      { type = "container_20ft", x = -50, z = -10, heading = 98 },
+      -- North side
+      { type = "FARP Tent", x = 0, z = 150, heading = 180 },
+      { type = "Windsock", x = 40, z = 150, heading = 0 },
+      { type = "container_20ft", x = -40, z = 150, heading = 180 },
+      
+      -- South side
+      { type = "FARP Tent", x = 0, z = -150, heading = 0 },
+      { type = "GeneratorF", x = 40, z = -150, heading = 0 },
+      { type = "container_20ft", x = -40, z = -150, heading = 0 },
+      
+      -- East side
+      { type = "FARP Tent", x = 150, z = 0, heading = 270 },
+      { type = "container_20ft", x = 150, z = 35, heading = 270 },
+      
+      -- West side
+      { type = "FARP Tent", x = -150, z = 0, heading = 90 },
+      { type = "container_20ft", x = -150, z = -35, heading = 90 },
     },
     
-    -- Stage 2: Operational FARP - adds fuel capability (5 more salvage) - Middle ring 80-130m
+    -- Stage 2: Outer Square Perimeter (5 salvage) - 200m from center, logistics/support
     [2] = {
-      { type = "M978 HEMTT Tanker", x = 90, z = 0, heading = 270 },
-      { type = "M978 HEMTT Tanker", x = -90, z = 0, heading = 90 },
-      { type = "FARP Fuel Depot", x = 95, z = -40, heading = 281 },
-      { type = "FARP Fuel Depot", x = -95, z = -40, heading = 79 },
-      { type = "FARP Tent", x = 80, z = 60, heading = 39 },
-      { type = "FARP Tent", x = -80, z = 60, heading = 321 },
-      { type = "container_40ft", x = 0, z = -100, heading = 180 },
-      { type = "container_40ft", x = 50, z = -100, heading = 180 },
-      { type = "FARP Ammo Dump Coating", x = 85, z = 70, heading = 30 },
-      { type = "FARP Ammo Dump Coating", x = -85, z = 70, heading = 330 },
-      { type = "Ural-375 PBU", x = 105, z = -30, heading = 247 },
-      { type = "Electric power box", x = 90, z = 50, heading = 36 },
-      { type = "Electric power box", x = -90, z = 50, heading = 324 },
-      { type = "GeneratorF", x = 0, z = -85, heading = 180 },
+      -- North side
+      { type = "FARP Fuel Depot", x = -50, z = 200, heading = 180 },
+      { type = "FARP Fuel Depot", x = 50, z = 200, heading = 180 },
+      { type = "FARP Tent", x = 0, z = 200, heading = 180 },
+      { type = "FARP CP Blindage", x = 100, z = 200, heading = 180 },
+      
+      -- South side  
+      { type = "FARP Ammo Dump Coating", x = -50, z = -200, heading = 0 },
+      { type = "FARP Ammo Dump Coating", x = 50, z = -200, heading = 0 },
+      { type = "container_40ft", x = 0, z = -200, heading = 0 },
+      { type = "Shelter", x = -100, z = -200, heading = 0 },
+      
+      -- East side
+      { type = "FARP Tent", x = 200, z = 50, heading = 270 },
+      { type = "FARP Tent", x = 200, z = -50, heading = 270 },
+      { type = "GeneratorF", x = 200, z = 0, heading = 270 },
+      
+      -- West side
+      { type = "FARP Tent", x = -200, z = 50, heading = 90 },
+      { type = "FARP Tent", x = -200, z = -50, heading = 90 },
+      { type = "Electric power box", x = -200, z = 0, heading = 90 },
+      
+      -- Corner markers
+      { type = "container_20ft", x = 180, z = 180, heading = 225 },
+      { type = "container_20ft", x = -180, z = 180, heading = 135 },
+      { type = "container_20ft", x = 180, z = -180, heading = 315 },
+      { type = "container_20ft", x = -180, z = -180, heading = 45 },
     },
     
-    -- Stage 3: Full Forward Airbase - adds ammo and comms (8 more salvage) - Outer ring 150-250m
-    [3] = {
-      { type = "FARP", x = 0, z = 0, heading = 0 },
-      -- Service objects near pad for scripted services
-      { type = "M978 HEMTT Tanker", x = 35, z = 0, heading = 270 },
-      { type = "M978 HEMTT Tanker", x = -35, z = 0, heading = 90 },
-      { type = "FARP Fuel Depot", x = 30, z = 25, heading = 315 },
-      { type = "FARP Fuel Depot", x = -30, z = 25, heading = 45 },
-      { type = "FARP Ammo Dump Coating", x = 40, z = -20, heading = 282 },
-      { type = "FARP Ammo Dump Coating", x = -40, z = -20, heading = 78 },
-      -- Extended support structures at outer ring
-      { type = "FARP CP Blindage", x = 0, z = 150, heading = 0 },
-      { type = "Shelter", x = 0, z = -160, heading = 180 },
-      { type = "SKP-11", x = 0, z = 180, heading = 0 },
-      { type = "ZiL-131 APA-80", x = 50, z = 165, heading = 8 },
-      { type = "FARP Tent", x = 170, z = 0, heading = 270 },
-      { type = "FARP Tent", x = -170, z = 0, heading = 90 },
-      { type = "FARP Tent", x = 120, z = 120, heading = 315 },
-      { type = "FARP Tent", x = -120, z = 120, heading = 45 },
-      { type = "FARP Ammo Dump Coating", x = 160, z = 80, heading = 30 },
-      { type = "FARP Ammo Dump Coating", x = -160, z = 80, heading = 330 },
-      { type = "container_20ft", x = -140, z = -130, heading = 128 },
-      { type = "container_20ft", x = -150, z = -120, heading = 133 },
-      { type = "container_20ft", x = 140, z = -130, heading = 52 },
-      { type = "container_20ft", x = 150, z = -120, heading = 47 },
-      { type = "GeneratorF", x = 155, z = -140, heading = 234 },
-      { type = "GeneratorF", x = -155, z = -140, heading = 126 },
-      { type = "UAZ-469", x = 70, z = 160, heading = 14 },
-      { type = "UAZ-469", x = -70, z = 160, heading = 346 },
-      { type = "Ural-375", x = -125, z = -135, heading = 125 },
-      { type = "Sandbox", x = 350, z = 0, heading = 270 },
-      { type = "Sandbox", x = -350, z = 0, heading = 90 },
-      { type = "Sandbox", x = 247, z = 247, heading = 315 },
-      { type = "Sandbox", x = -247, z = 247, heading = 45 },
-      { type = "Sandbox", x = 247, z = -247, heading = 225 },
-      { type = "Sandbox", x = -247, z = -247, heading = 135 },
-    },
+    -- Stage 3: Uses functional FARP - no static layout needed, decorations added separately
+    [3] = {},
   },
 }
 
@@ -2023,7 +2010,6 @@ CTLD._pendingTimers = CTLD._pendingTimers or {}  -- [timerId] = true
 
 -- FARP System state
 CTLD._farpData = CTLD._farpData or {}  -- [fobZoneName] = { stage = 1/2/3, statics = {name1, name2...}, coalition = side }
-CTLD._farpZones = CTLD._farpZones or {}  -- [farpZoneName] = { zone, side, stage }
 
 local function _distanceXZ(a, b)
   if not a or not b then return math.huge end
@@ -9672,27 +9658,7 @@ function CTLD:ScanGroundAutoLoad()
               if groundCfg.RequirePickupZone then
                 local inPickupZone = self:_isUnitInsidePickupZone(unit, true)
                 
-                -- Explicitly exclude FARP service zones from auto-load
-                local inFARPZone = false
-                local unitPoint = unit:GetPointVec3()
-                for farpZoneName, farpInfo in pairs(CTLD._farpZones or {}) do
-                  local farpZone = farpInfo.zone
-                  if farpZone then
-                    local farpPoint = farpZone:GetPointVec3()
-                    local dx = (farpPoint.x - unitPoint.x)
-                    local dz = (farpPoint.z - unitPoint.z)
-                    local d = math.sqrt(dx*dx + dz*dz)
-                    local farpRadius = self:_getZoneRadius(farpZone)
-                    if d <= farpRadius then
-                      inFARPZone = true
-                      break
-                    end
-                  end
-                end
-                
-                if inFARPZone then
-                  inValidZone = false -- Never auto-load in FARP zones
-                elseif not inPickupZone and groundCfg.AllowInFOBZones then
+                if not inPickupZone and groundCfg.AllowInFOBZones then
                   -- Check FOB zones too
                   for _, fobZone in ipairs(self.FOBZones or {}) do
                     local fname = fobZone:GetName()
@@ -10670,6 +10636,15 @@ end
 function CTLD:InitFARP()
   if not (CTLD.FARPConfig and CTLD.FARPConfig.Enabled) then return end
   _logInfo('FARP system initialized')
+  
+  -- Initialize unit ID counter for spawning service units
+  CTLD._farpUnitIdCounter = CTLD._farpUnitIdCounter or 50000
+end
+
+-- Get next unique unit ID for FARP service units
+function CTLD:GetNextUnitId()
+  CTLD._farpUnitIdCounter = (CTLD._farpUnitIdCounter or 50000) + 1
+  return CTLD._farpUnitIdCounter
 end
 
 -- Get FARP data for a FOB zone
@@ -10717,61 +10692,132 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
   -- Note: 'coalitionId' parameter is a number (1=red, 2=blue), not the coalition table
   local coalitionName = (coalitionId == 2) and 'blue' or 'red'
   
+  -- Service vehicle types that need to be spawned as ground units, not statics
+  local serviceVehicles = {
+    ["M978 HEMTT Tanker"] = true,      -- Refuel service
+    ["Ural-375 PBU"] = true,           -- Fuel support
+    ["M978 HEMTT Tanker"] = true,      -- Additional fuel
+    ["Ural-4320 APA-5D"] = true,       -- Ammo truck for rearm
+    ["M1043 HMMWV Armament"] = true,   -- Command/coordination
+    ["GAZ-66"] = true,                 -- Support vehicle
+  }
+  
   for _, obj in ipairs(layout) do
     -- Calculate world position from relative offset
     local worldX = centerPoint.x + obj.x
     local worldZ = centerPoint.z + obj.z
     local worldY = land.getHeight({x = worldX, y = worldZ})
     
-    -- Generate unique name
-    local staticName = string.format('FARP_%s_S%d_%s_%d', zoneName, stage, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
-    
-    -- Determine category and shape_name based on object type
-    local category = "Fortifications"
-    local shapeName = ""
-    local linkUnit = nil
-    local linkOffset = false
-    local callsignID = math.random(1, 99)
-    
-    if obj.type == "FARP" then
-      category = "Heliports"
-      shapeName = "FARP"
-      linkUnit = 0
-      linkOffset = true
-    end
-    
-    -- Create static object data
-    local staticData = {
-      ["type"] = obj.type,
-      ["name"] = staticName,
-      ["heading"] = math.rad(obj.heading or 0),
-      ["x"] = worldX,
-      ["y"] = worldZ,
-      ["category"] = category,
-      ["canCargo"] = false,
-      ["shape_name"] = shapeName,
-      ["rate"] = 100,
-    }
-    
-    -- Add FARP-specific data
-    if obj.type == "FARP" then
-      staticData["linkUnit"] = linkUnit
-      staticData["linkOffset"] = linkOffset
-      staticData["callsign_id"] = callsignID
-      staticData["frequencyList"] = {127.5, 129.5, 121.5}
-      staticData["modulation"] = 0
-    end
-    
-    -- Spawn the static
-    local success, staticObj = pcall(function()
-      return coalition.addStaticObject(coalitionId, staticData)
-    end)
-    
-    if success and staticObj then
-      table.insert(farpData.statics, staticName)
-      _logDebug(string.format('Spawned FARP static: %s at (%.1f, %.1f)', staticName, worldX, worldZ))
+    -- Check if this should be a service unit instead of static
+    if serviceVehicles[obj.type] then
+      -- Spawn as ground unit for FARP services
+      local unitName = string.format('FARP_%s_S%d_%s_%d', zoneName, stage, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
+      local groupName = unitName .. '_Group'
+      
+      local groupData = {
+        ["visible"] = false,
+        ["taskSelected"] = true,
+        ["route"] = {
+          ["points"] = {
+            [1] = {
+              ["alt"] = 0,
+              ["type"] = "Turning Point",
+              ["action"] = "Off Road",
+              ["alt_type"] = "BARO",
+              ["form"] = "Off Road",
+              ["y"] = worldZ,
+              ["x"] = worldX,
+              ["speed"] = 0,
+              ["task"] = {
+                ["id"] = "ComboTask",
+                ["params"] = {
+                  ["tasks"] = {}
+                }
+              }
+            }
+          }
+        },
+        ["hidden"] = false,
+        ["units"] = {
+          [1] = {
+            ["transportable"] = {["randomTransportable"] = false},
+            ["skill"] = "Average",
+            ["type"] = obj.type,
+            ["unitId"] = self:GetNextUnitId(),
+            ["y"] = worldZ,
+            ["x"] = worldX,
+            ["name"] = unitName,
+            ["heading"] = math.rad(obj.heading or 0),
+            ["playerCanDrive"] = false
+          }
+        },
+        ["y"] = worldZ,
+        ["x"] = worldX,
+        ["name"] = groupName,
+        ["start_time"] = 0
+      }
+      
+      local success, spawnedGroup = pcall(function()
+        return coalition.addGroup(coalitionId, Group.Category.GROUND, groupData)
+      end)
+      
+      if success and spawnedGroup then
+        table.insert(farpData.statics, unitName)
+        _logDebug(string.format('Spawned FARP service unit: %s at (%.1f, %.1f)', unitName, worldX, worldZ))
+      else
+        _logError(string.format('Failed to spawn FARP service unit: %s (%s)', obj.type, tostring(spawnedGroup)))
+      end
     else
-      _logError(string.format('Failed to spawn FARP static: %s (%s)', obj.type, tostring(staticObj)))
+      -- Spawn as static object (decorative)
+      local staticName = string.format('FARP_%s_S%d_%s_%d', zoneName, stage, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
+      
+      -- Determine category and shape_name based on object type
+      local category = "Fortifications"
+      local shapeName = ""
+      local linkUnit = nil
+      local linkOffset = false
+      local callsignID = math.random(1, 99)
+      
+      if obj.type == "FARP" then
+        category = "Heliports"
+        shapeName = "FARP"
+        linkUnit = 0
+        linkOffset = true
+      end
+      
+      -- Create static object data
+      local staticData = {
+        ["type"] = obj.type,
+        ["name"] = staticName,
+        ["heading"] = math.rad(obj.heading or 0),
+        ["x"] = worldX,
+        ["y"] = worldZ,
+        ["category"] = category,
+        ["canCargo"] = false,
+        ["shape_name"] = shapeName,
+        ["rate"] = 100,
+      }
+      
+      -- Add FARP-specific data
+      if obj.type == "FARP" then
+        staticData["linkUnit"] = linkUnit
+        staticData["linkOffset"] = linkOffset
+        staticData["callsign_id"] = callsignID
+        staticData["frequencyList"] = {127.5, 129.5, 121.5}
+        staticData["modulation"] = 0
+      end
+      
+      -- Spawn the static
+      local success, staticObj = pcall(function()
+        return coalition.addStaticObject(coalitionId, staticData)
+      end)
+      
+      if success and staticObj then
+        table.insert(farpData.statics, staticName)
+        _logDebug(string.format('Spawned FARP static: %s at (%.1f, %.1f)', staticName, worldX, worldZ))
+      else
+        _logError(string.format('Failed to spawn FARP static: %s (%s)', obj.type, tostring(staticObj)))
+      end
     end
   end
   
@@ -10782,6 +10828,13 @@ function CTLD:SpawnFARPStatics(zoneName, stage, centerPoint, coalitionId)
   _logInfo(string.format('FARP Stage %d complete for zone %s - spawned %d statics', stage, zoneName, #farpData.statics))
   return true
 end
+
+-- FARP services are provided by DCS engine via F8 Ground Crew menu
+-- The FARP static object (spawned at stage 3) provides built-in services when helicopters:
+--   1. Land within the FARP's service radius (handled by DCS)
+--   2. Open F8 menu -> Ground Crew
+--   3. Request Refuel, Rearm, or Repair
+-- Scripting cannot intercept or automate these services due to DCS API limitations
 
 -- Upgrade a FOB to the next FARP stage
 function CTLD:UpgradeFARP(group, zoneName)
@@ -10839,29 +10892,23 @@ function CTLD:UpgradeFARP(group, zoneName)
   -- Deduct salvage
   CTLD._salvagePoints[self.Side] = currentSalvage - upgradeCost
   
-  -- Spawn statics for this stage
   _eventSend(self, group, nil, 'farp_upgrade_started', { stage = nextStage })
   
-  local success = self:SpawnFARPStatics(zoneName, nextStage, centerPoint, self.Side)
+  local success = false
+  
+  -- Stage 3 uses MOOSE functional FARP, earlier stages use visual statics only
+  if nextStage == 3 then
+    success = self:SpawnFunctionalFARP(zoneName, centerPoint, self.Side)
+  else
+    success = self:SpawnFARPStatics(zoneName, nextStage, centerPoint, self.Side)
+  end
   
   if success then
-    -- Determine services available
-    local services = {}
-    if nextStage >= 1 then table.insert(services, 'Landing Zone') end
-    if nextStage >= 2 then table.insert(services, 'Refuel') end
-    if nextStage >= 3 then 
-      table.insert(services, 'Rearm')
-      table.insert(services, 'Repair')
-    end
-    
-    _eventSend(self, nil, self.Side, 'farp_upgrade_complete', {
+    local msgKey = (nextStage == 3) and 'farp_upgrade_complete_stage3' or 'farp_upgrade_complete'
+    _eventSend(self, nil, self.Side, msgKey, {
       player = _playerNameFromGroup(group),
-      stage = nextStage,
-      services = table.concat(services, ', ')
+      stage = nextStage
     })
-    
-    -- Create or update FARP service zone (use same offset centerPoint)
-    self:CreateFARPServiceZone(zoneName, centerPoint, nextStage)
     
     _logInfo(string.format('%s upgraded FOB %s to FARP Stage %d (cost: %d salvage)', 
       _playerNameFromGroup(group), zoneName, nextStage, upgradeCost))
@@ -10872,154 +10919,127 @@ function CTLD:UpgradeFARP(group, zoneName)
   end
 end
 
--- Create FARP service zone for rearm/refuel
-function CTLD:CreateFARPServiceZone(zoneName, centerPoint, stage)
-  if stage < 2 then return end -- Only stages 2+ have services
+-- Spawn a functional FARP using MOOSE utilities (Stage 3 only)
+function CTLD:SpawnFunctionalFARP(zoneName, centerPoint, coalitionId)
+  _logInfo(string.format('Spawning functional FARP for zone %s (coalition %d)', zoneName, coalitionId))
   
-  local radius = CTLD.FARPConfig.ServiceRadius[stage] or 50
-  local farpZoneName = string.format('%s_FARP_Service', zoneName)
+  -- Convert coalition ID to country
+  local countryId = (coalitionId == 2) and country.id.USA or country.id.RUSSIA
   
-  -- Create zone
-  local v2 = (VECTOR2 and VECTOR2.New) and VECTOR2:New(centerPoint.x, centerPoint.z) or { x = centerPoint.x, y = centerPoint.z }
-  local serviceZone = ZONE_RADIUS:New(farpZoneName, v2, radius)
+  -- Generate unique FARP name and frequency
+  CTLD._farpCounter = (CTLD._farpCounter or 0) + 1
+  local farpNameNumber = ((CTLD._farpCounter - 1) % 10) + 1
+  local farpFreq = 129 + CTLD._farpCounter
   
-  -- Enable scanning for the zone (scan for units and helicopters)
-  if serviceZone.Scan then
-    pcall(function()
-      serviceZone:Scan({Object.Category.UNIT, Object.Category.STATIC})
-    end)
-  end
-  
-  CTLD._farpZones[farpZoneName] = {
-    zone = serviceZone,
-    side = self.Side,
-    stage = stage,
-    parentFOB = zoneName
+  local farpClearNames = {
+    [1]="London", [2]="Dallas", [3]="Paris", [4]="Moscow", [5]="Berlin",
+    [6]="Rome", [7]="Madrid", [8]="Warsaw", [9]="Dublin", [10]="Perth",
   }
   
-  -- Start service scheduler
-  self:StartFARPServices(farpZoneName)
+  local clearName = farpClearNames[farpNameNumber] or "Outpost"
+  local farpName = string.format("%s FARP %dAM", clearName, farpFreq)
   
-  _logInfo(string.format('Created FARP service zone %s (radius: %dm, stage: %d)', farpZoneName, radius, stage))
+  -- Create coordinate from centerPoint
+  local coord = COORDINATE:New(centerPoint.x, land.getHeight({x = centerPoint.x, y = centerPoint.z}), centerPoint.z)
+  
+  -- Spawn functional FARP using MOOSE utility
+  -- This creates a FARP with actual service capability
+  local success = pcall(function()
+    UTILS.SpawnFARPAndFunctionalStatics(
+      farpName,                      -- FARP name
+      coord,                         -- Coordinate
+      ENUMS.FARPType.FARP,          -- FARP type (visible)
+      coalitionId,                   -- Coalition
+      countryId,                     -- Country
+      farpNameNumber,                -- Callsign number
+      farpFreq,                      -- Frequency
+      radio.modulation.AM,           -- Modulation
+      nil,                           -- Link unit (auto)
+      nil,                           -- Loadout type (default)
+      nil,                           -- Resources (default)
+      20,                            -- Fuel tons (20 tons each type)
+      50                             -- Equipment quantity
+    )
+  end)
+  
+  if success then
+    -- Store FARP data
+    local farpData = CTLD._farpData[zoneName] or { stage = 0, statics = {}, coalition = coalitionId }
+    farpData.stage = 3
+    farpData.farpName = farpName
+    farpData.frequency = farpFreq
+    CTLD._farpData[zoneName] = farpData
+    
+    _logInfo(string.format('Functional FARP %s created at freq %dAM', farpName, farpFreq))
+    
+    -- Also add decorative statics around it from Stage 1 and 2 layouts
+    self:SpawnFARPDecorations(zoneName, centerPoint, coalitionId)
+    
+    return true
+  else
+    _logError(string.format('Failed to spawn functional FARP for %s', zoneName))
+    return false
+  end
 end
 
--- Start FARP service scheduler
-function CTLD:StartFARPServices(farpZoneName)
-  local farpInfo = CTLD._farpZones[farpZoneName]
-  if not farpInfo then return end
-  
-  local selfref = self
-  CTLD._farpServiceState = CTLD._farpServiceState or {}
-  
-  -- Service scheduler runs every 2 seconds
-  SCHEDULER:New(nil, function()
-    local zone = farpInfo.zone
-    if not zone then return end
+-- Spawn decorative statics around the functional FARP
+function CTLD:SpawnFARPDecorations(zoneName, centerPoint, coalitionId)
+  -- Decorative objects forming outermost square perimeter (120m from center)
+  -- Functional FARP auto-spawns service objects in the center, these decorations complete the base
+  local decorations = {
+    -- North side - Command and operations
+    { type = "FARP CP Blindage", x = 0, z = 120, heading = 180 },
+    { type = "FARP Tent", x = -40, z = 120, heading = 180 },
+    { type = "FARP Tent", x = 40, z = 120, heading = 180 },
+    { type = "Shelter", x = -80, z = 120, heading = 180 },
+    { type = "Windsock", x = 80, z = 120, heading = 0 },
     
-    local stage = farpInfo.stage
-    local now = timer.getTime()
+    -- South side - Logistics and storage
+    { type = "container_40ft", x = 0, z = -120, heading = 0 },
+    { type = "FARP Tent", x = -50, z = -120, heading = 0 },
+    { type = "FARP Tent", x = 50, z = -120, heading = 0 },
+    { type = "FARP Ammo Dump Coating", x = -90, z = -120, heading = 0 },
+    { type = "FARP Ammo Dump Coating", x = 90, z = -120, heading = 0 },
     
-    -- Scan zone for units
-    local zoneVec3 = zone:GetPointVec3()
-    local radius = selfref:_getZoneRadius(zone)
-    local volS = {
-      id = world.VolumeType.SPHERE,
-      params = {
-        point = zoneVec3,
-        radius = radius
-      }
+    -- East side - Fuel and support
+    { type = "FARP Fuel Depot", x = 120, z = 40, heading = 270 },
+    { type = "FARP Fuel Depot", x = 120, z = -40, heading = 270 },
+    { type = "FARP Tent", x = 120, z = 0, heading = 270 },
+    { type = "GeneratorF", x = 120, z = 80, heading = 270 },
+    
+    -- West side - Power and maintenance
+    { type = "FARP Tent", x = -120, z = 40, heading = 90 },
+    { type = "FARP Tent", x = -120, z = -40, heading = 90 },
+    { type = "Electric power box", x = -120, z = 0, heading = 90 },
+    { type = "GeneratorF", x = -120, z = 80, heading = 90 },
+    
+    -- Corner positions - Perimeter markers
+    { type = "container_20ft", x = 110, z = 110, heading = 225 },
+    { type = "container_20ft", x = -110, z = 110, heading = 135 },
+    { type = "container_20ft", x = 110, z = -110, heading = 315 },
+    { type = "container_20ft", x = -110, z = -110, heading = 45 },
+  }
+  
+  for _, obj in ipairs(decorations) do
+    local worldX = centerPoint.x + obj.x
+    local worldZ = centerPoint.z + obj.z
+    local staticName = string.format('FARP_%s_Decor_%s_%d', zoneName, obj.type:gsub('%s+', '_'), math.random(10000, 99999))
+    
+    local staticData = {
+      ["type"] = obj.type,
+      ["name"] = staticName,
+      ["heading"] = math.rad(obj.heading or 0),
+      ["x"] = worldX,
+      ["y"] = worldZ,
+      ["category"] = "Fortifications",
+      ["canCargo"] = false,
+      ["rate"] = 100,
     }
     
-    local foundUnits = {}
-    world.searchObjects(Object.Category.UNIT, volS, function(obj)
-      local unit = UNIT:Find(obj)
-      if unit and unit:IsAlive() then
-        local unitCoalition = unit:GetCoalition()
-        -- Only service friendly units
-        if unitCoalition == farpInfo.side then
-          if unit:IsAir() or unit:IsGround() then
-            table.insert(foundUnits, unit)
-          end
-        end
-      end
-      return true
+    pcall(function()
+      coalition.addStaticObject(coalitionId, staticData)
     end)
-    
-    for _, unit in ipairs(foundUnits) do
-      local dcsUnit = unit:GetDCSObject()
-      if dcsUnit then
-        local uname = unit:GetName()
-        local agl = unit:GetAltitude() - land.getHeight(unit:GetPointVec2())
-        local vel = unit:GetVelocityKMH()
-        
-        -- Check if aircraft is on ground (low AGL and low speed)
-        local onGround = (agl < 5) and (vel < 5)
-        
-        if onGround then
-          CTLD._farpServiceState[uname] = CTLD._farpServiceState[uname] or { lastService = 0 }
-          local state = CTLD._farpServiceState[uname]
-          
-          -- Service every 3 seconds to avoid spam
-          if (now - state.lastService) >= 3 then
-            local serviced = false
-            
-            -- Stage 2+: Refuel
-            if stage >= 2 then
-              local fuel = dcsUnit:getFuel()
-              if fuel < 0.95 then
-                -- Add 10% fuel per service tick (takes ~30 seconds for full refuel)
-                dcsUnit:setFuel(math.min(1.0, fuel + 0.10))
-                serviced = true
-              end
-            end
-            
-            -- Stage 3: Rearm
-            if stage >= 3 then
-              pcall(function()
-                -- Rearm all pylons to full
-                local ammo = dcsUnit:getAmmo()
-                if ammo then
-                  for _, wpn in ipairs(ammo) do
-                    if wpn.count then
-                      -- Set to full ammo (this is a workaround - DCS has limited rearm API)
-                      dcsUnit:setAmmo(wpn.type_name, wpn.count + 100)
-                    end
-                  end
-                  serviced = true
-                end
-              end)
-              
-              -- Repair (restore hit points)
-              local life = dcsUnit:getLife()
-              local life0 = dcsUnit:getLife0()
-              if life and life0 and life < life0 then
-                -- Repair 20% per tick (takes ~15 seconds for full repair)
-                dcsUnit:setLife(math.min(life0, life + (life0 * 0.20)))
-                serviced = true
-              end
-            end
-            
-            if serviced then
-              state.lastService = now
-              local gname = unit:GetGroup():GetName()
-              if stage >= 3 then
-                MESSAGE:New(string.format('FARP: Servicing %s (Refuel/Rearm/Repair)', unit:GetTypeName()), 5):ToGroup(GROUP:FindByName(gname))
-              else
-                MESSAGE:New(string.format('FARP: Refueling %s', unit:GetTypeName()), 5):ToGroup(GROUP:FindByName(gname))
-              end
-            end
-          end
-        else
-          -- Aircraft not on ground, reset service timer
-          if CTLD._farpServiceState[uname] then
-            CTLD._farpServiceState[uname].lastService = 0
-          end
-        end
-      end
-    end
-  end, {}, 0, 2) -- Start immediately, repeat every 2 seconds
-  
-  _logDebug(string.format('FARP service scheduler started for %s', farpZoneName))
+  end
 end
 
 -- Show FARP status for nearby FOB
@@ -11043,32 +11063,20 @@ function CTLD:ShowFARPStatus(group)
   
   if currentStage >= 3 then
     -- Fully upgraded
-    local services = 'Landing Zone, Refuel, Rearm, Repair'
-    _eventSend(self, group, nil, 'farp_status_maxed', {
-      stage = currentStage,
-      max_stage = 3,
-      services = services
-    })
+    MESSAGE:New('FOB + FARP Status: Stage 3/3 (FULLY UPGRADED)\nFunctional FARP operational - use F8 Ground Crew menu\nFOB logistics: ACTIVE', 15):ToGroup(group)
   elseif currentStage > 0 then
     -- Partially upgraded
-    local services = {}
-    if currentStage >= 1 then table.insert(services, 'Landing Zone') end
-    if currentStage >= 2 then table.insert(services, 'Refuel') end
-    if currentStage >= 3 then 
-      table.insert(services, 'Rearm')
-      table.insert(services, 'Repair')
-    end
-    
     local nextStage = currentStage + 1
     local nextCost = CTLD.FARPConfig.StageCosts[nextStage] or 0
     
-    _eventSend(self, group, nil, 'farp_status', {
-      stage = currentStage,
-      max_stage = 3,
-      services = table.concat(services, ', '),
-      next_cost = nextCost,
-      next_stage = nextStage
-    })
+    local statusMsg = string.format('FOB + FARP Status: Stage %d/3', currentStage)
+    statusMsg = statusMsg .. '\nInfrastructure only - upgrade to Stage 3 for services'
+    statusMsg = statusMsg .. '\nFOB logistics: ACTIVE'
+    if nextStage <= 3 then
+      statusMsg = statusMsg .. string.format('\nNext upgrade: %d salvage (Stage %d)', nextCost, nextStage)
+    end
+    
+    MESSAGE:New(statusMsg, 15):ToGroup(group)
   else
     -- Base FOB, not yet upgraded
     local nextCost = CTLD.FARPConfig.StageCosts[1] or 0

@@ -366,6 +366,10 @@ function FAC:_wireBirth()
     local unit = e.IniUnit
     if not unit or not unit:IsAlive() then return end
     if unit:GetCoalition() ~= selfref.Side then return end
+    
+    -- Skip if this is a static object or doesn't have GetGroup method
+    if not unit.GetGroup then return end
+    
     -- classify as AFAC / RECCE / Arty Director
     local name = unit:GetName()
     local tname = unit:GetTypeName()
