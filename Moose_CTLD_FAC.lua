@@ -337,8 +337,17 @@ function FAC:New(ctld, cfg)
   o:_wireShots()
 
   -- Schedulers for menus/status/lase loop/AI spotters
+  local gcCounter = 0
   o._schedMenus = SCHEDULER:New(nil, function() o:_ensureMenus() end, {}, 5, 10)
-  o._schedStatus = SCHEDULER:New(nil, function() o:_checkFacStatus() end, {}, 5, 1.0)
+  o._schedStatus = SCHEDULER:New(nil, function() 
+    o:_checkFacStatus()
+    -- Incremental GC every 60 iterations (60 seconds at 1s interval)
+    gcCounter = gcCounter + 1
+    if gcCounter >= 60 then
+      collectgarbage('step', 100)
+      gcCounter = 0
+    end
+  end, {}, 5, 1.0)
   o._schedAI = SCHEDULER:New(nil, function() o:_artyAICall() end, {}, 10, 30)
 
   -- Create placeholder menu at mission start to reserve F10 position if requested

@@ -3270,27 +3270,25 @@ end
 -- Track one-shot timers for cleanup
 local function _trackOneShotTimer(id)
   if id and CTLD._pendingTimers then
-    CTLD._pendingTimers[id] = true
+    CTLD._pendingTimers[id] = timer.getTime() + 300 -- Store timestamp for cleanup
   end
   return id
 end
 
+-- Remove timer from tracking immediately when it fires
+local function _untrackTimer(id)
+  if id and CTLD._pendingTimers then
+    CTLD._pendingTimers[id] = nil
+  end
+end
+
 -- Clean up one-shot timers when they execute
-local function _wrapOneShotCallback(callback)
+local function _wrapOneShotCallback(callback, timerId)
   return function(...)
     local result = callback(...)
-    -- If callback returns a time, it's recurring - don't remove
+    -- If callback returns nil or not a number, it's one-shot - remove from tracking
     if not result or type(result) ~= 'number' then
-      local trackedId = nil
-      for id, _ in pairs(CTLD._pendingTimers or {}) do
-        if id == callback then
-          trackedId = id
-          break
-        end
-      end
-      if trackedId and CTLD._pendingTimers then
-        CTLD._pendingTimers[trackedId] = nil
-      end
+      _untrackTimer(timerId)
     end
     return result
   end
@@ -3653,18 +3651,31 @@ function CTLD:_ensurePeriodicGC()
       end
     end
 
-    -- Clean up stale pending timer references
+    -- Clean up stale pending timer references based on timestamp
     if CTLD and CTLD._pendingTimers then
+      local now = timer.getTime()
       local timerCount = 0
-      for _ in pairs(CTLD._pendingTimers) do
+      local cleaned = 0
+      for timerId, expireTime in pairs(CTLD._pendingTimers) do
         timerCount = timerCount + 1
+        -- Remove timers that should have fired more than 60 seconds ago
+        if type(expireTime) == 'number' and now > expireTime + 60 then
+          CTLD._pendingTimers[timerId] = nil
+          cleaned = cleaned + 1
+        end
       end
-      if timerCount > 200 then
-        -- If we have too many pending timers, clear old ones (they may have fired already)
-        env.info(string.format('[CTLD][GC] Clearing %d stale timer references', timerCount))
+      if cleaned > 0 then
+        env.info(string.format('[CTLD][GC] Cleaned %d stale timer references (total: %d)', cleaned, timerCount))
+      end
+      -- Emergency cleanup if we still have too many
+      if timerCount > 300 then
+        env.info(string.format('[CTLD][GC] Emergency clearing %d timer references', timerCount))
         CTLD._pendingTimers = {}
       end
     end
+
+    -- Force garbage collection
+    collectgarbage('step', 1000)
 
     return timer.getTime() + 300  -- every 5 minutes
   end
@@ -3688,9 +3699,16 @@ function CTLD:_startHoverScheduler()
   if not coachCfg.enabled or self.HoverSched then return end
   local interval = coachCfg.interval or 0.75
   local startDelay = coachCfg.startDelay or interval
+  local gcCounter = 0
   self.HoverSched = SCHEDULER:New(nil, function()
     local ok, err = pcall(function() self:ScanHoverPickup() end)
     if not ok then _logError('HoverSched ScanHoverPickup error: '..tostring(err)) end
+    -- Incremental GC every 50 iterations (~37 seconds at 0.75s interval)
+    gcCounter = gcCounter + 1
+    if gcCounter >= 50 then
+      collectgarbage('step', 100)
+      gcCounter = 0
+    end
   end, {}, startDelay, interval)
 end
 
@@ -3698,9 +3716,16 @@ function CTLD:_startGroundLoadScheduler()
   local groundCfg = CTLD.GroundAutoLoadConfig or {}
   if not groundCfg.Enabled or self.GroundLoadSched then return end
   local interval = 1.0 -- check every second for ground load conditions
+  local gcCounter = 0
   self.GroundLoadSched = SCHEDULER:New(nil, function()
     local ok, err = pcall(function() self:ScanGroundAutoLoad() end)
     if not ok then _logError('GroundLoadSched ScanGroundAutoLoad error: '..tostring(err)) end
+    -- Incremental GC every 60 iterations (60 seconds)
+    gcCounter = gcCounter + 1
+    if gcCounter >= 60 then
+      collectgarbage('step', 100)
+      gcCounter = 0
+    end
   end, {}, interval, interval)
 end
 
@@ -4990,18 +5015,21 @@ function CTLD:New(cfg)
   o.Sched = SCHEDULER:New(nil, function()
     local ok, err = pcall(function() o:CleanupCrates() end)
     if not ok then _logError('CleanupCrates scheduler error: '..tostring(err)) end
+    collectgarbage('step', 200)  -- GC after cleanup
   end, {}, 60, 60)
 
   -- Periodic cleanup for deployed troops (remove dead/missing groups)
   o.TroopCleanupSched = SCHEDULER:New(nil, function()
     local ok, err = pcall(function() o:CleanupDeployedTroops() end)
     if not ok then _logError('CleanupDeployedTroops scheduler error: '..tostring(err)) end
+    collectgarbage('step', 200)  -- GC after cleanup
   end, {}, 30, 30)
 
   -- Periodic comprehensive state maintenance (prune orphaned entries)
   o.StateMaintSched = SCHEDULER:New(nil, function()
     local ok, err = pcall(function() o:PruneOrphanedState() end)
     if not ok then _logError('PruneOrphanedState scheduler error: '..tostring(err)) end
+    collectgarbage('step', 300)  -- GC after state pruning
   end, {}, 120, 120)  -- Run every 2 minutes
 
   -- Optional: auto-build FOBs inside FOB zones when crates present
@@ -8460,6 +8488,7 @@ end
 function CTLD:CleanupCrates()
   local now = timer.getTime()
   local life = self.Config.CrateLifetime
+  local cleaned = 0
   for name,meta in pairs(CTLD._crates) do
     if now - (meta.spawnTime or now) > life then
       local obj = StaticObject.getByName(name)
@@ -8467,6 +8496,7 @@ function CTLD:CleanupCrates()
       _cleanupCrateSmoke(name)  -- Clean up smoke refresh schedule
       _removeFromSpatialGrid(name, meta.point, 'crate')  -- Remove from spatial index
       CTLD._crates[name] = nil
+      cleaned = cleaned + 1
       _logDebug('Cleaned up crate '..name)
       -- Notify requester group if still around; else coalition
       local gname = meta.requester
@@ -8478,10 +8508,15 @@ function CTLD:CleanupCrates()
       end
     end
   end
+  -- Trigger garbage collection after cleanup if we removed items
+  if cleaned > 5 then
+    collectgarbage('step', 500)
+  end
 end
 
 function CTLD:CleanupDeployedTroops()
   -- Remove any deployed troop groups that are dead or no longer exist
+  local cleaned = 0
   for troopGroupName, troopMeta in pairs(CTLD._deployedTroops) do
     if troopMeta.side == self.Side then
       local troopGroup = GROUP:FindByName(troopGroupName)
@@ -8491,9 +8526,14 @@ function CTLD:CleanupDeployedTroops()
           _removeFromSpatialGrid(troopGroupName, troopMeta.point, 'troops')
         end
         CTLD._deployedTroops[troopGroupName] = nil
+        cleaned = cleaned + 1
         _logDebug('Cleaned up deployed troop group: '..troopGroupName)
       end
     end
+  end
+  -- Trigger garbage collection after cleanup if we removed items
+  if cleaned > 3 then
+    collectgarbage('step', 300)
   end
 end
 
@@ -8584,6 +8624,10 @@ function CTLD:PruneOrphanedState()
   
   if pruned > 0 then
     _logVerbose(string.format('[StateMaint] Pruned %d orphaned state entries', pruned))
+    -- Trigger garbage collection after significant pruning
+    if pruned > 10 then
+      collectgarbage('step', 500)
+    end
   end
 end
 --#endregion Crates
