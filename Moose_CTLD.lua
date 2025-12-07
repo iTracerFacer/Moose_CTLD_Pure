@@ -702,9 +702,9 @@ CTLD.FARPConfig = {
   
   -- Salvage costs for each stage upgrade
   StageCosts = {
-    [1] = 3,   -- FOB -> Stage 1 FARP (basic pad)
-    [2] = 5,   -- Stage 1 -> Stage 2 (operational fuel)
-    [3] = 8,   -- Stage 2 -> Stage 3 (full forward airbase)
+    [1] = 10,   -- FOB -> Stage 1 FARP (basic pad)
+    [2] = 20,   -- Stage 1 -> Stage 2 (operational fuel)
+    [3] = 40,   -- Stage 2 -> Stage 3 (full forward airbase)
   },
   
   -- FARP static object provides services via DCS F8 Ground Crew menu
